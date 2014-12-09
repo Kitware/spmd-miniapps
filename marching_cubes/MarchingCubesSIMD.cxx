@@ -2,7 +2,7 @@
 #include "MarchingCubesTables.h"
 #include "PointLocator3D.h"
 #include "TriangleMesh3D.h"
-#include "Gradient.h"
+#include "Gradient.ispc.h"
 
 #include <iostream>
 

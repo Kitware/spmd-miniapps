@@ -1,6 +1,6 @@
 #include "Image3D.h"
 #include "MarchingCubes.h"
-#include "MarchingCubesISPC.h"
+#include "MarchingCubesISPC.ispc.h"
 #include "MarchingCubesTables.h"
 #include "PointLocator3D.h"
 #include "TriangleMesh3D.h"

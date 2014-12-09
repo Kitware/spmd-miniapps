@@ -9,9 +9,19 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 
-include_directories (${Boost_INCLUDE_DIRS})
+set (CMAKE_CXX_FLAGS "-msse4.2")
 
-ispc_compile (ISPC_OBJS ISPC_HDRS "--target=sse4-i32x8"
+include_directories (
+  ${Boost_INCLUDE_DIRS}
+  "${ISPC_ROOT}/examples/intrinsics"
+)
+
+#ispc_compile (ISPC_OBJS ISPC_SRCS "--target=avx2-i32x8"
+#  Gradient.ispc
+#  MarchingCubesISPC.ispc
+#)
+
+ispc_generate_cxx (ISPC_SRCS 4 "sse4.h" ""
   Gradient.ispc
   MarchingCubesISPC.ispc
 )
@@ -24,7 +34,7 @@ add_executable (MarchingCubes MACOSX_BUNDLE
   MarchingCubesTables.cxx
   main.cxx
   SaveTriangleMesh3D.cxx
-  ${ISPC_HDRS}
+  ${ISPC_SRCS}
 )
 
 target_link_libraries (MarchingCubes
