@@ -1,21 +1,46 @@
 #ifndef __MarchingCubes_h
 #define __MarchingCubes_h
 
-struct TriangleMesh3D;
+#include "type.h"
 
-namespace serial {
-void extractIsosurface(const Image3D &vol, double isoval,
-                       TriangleMesh3D *mesh);
+namespace scalar {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
 };
 
-namespace simd {
-void extractIsosurface(const Image3D &vol, double isoval,
-                       TriangleMesh3D *mesh);
+namespace mixed {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
 };
 
-namespace ispc {
-void extractIsosurface(const Image3D &vol, double isoval,
-                       TriangleMesh3D *mesh);
+namespace vectorized {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+};
+
+namespace scalar_2 {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+};
+
+namespace scalar_3 {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+};
+
+namespace mixed_3 {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+};
+
+namespace scalar_3_1 {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+};
+
+namespace mixed_3_1 {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
 };
 
 #endif

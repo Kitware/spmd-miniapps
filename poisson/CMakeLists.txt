@@ -9,23 +9,14 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 
-set (EXTRA_COMPILER_FLAGS
-  "-Wall -Wextra -Wstrict-aliasing -Wno-unused"
-  CACHE STRING ""
-)
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${EXTRA_COMPILER_FLAGS}")
-
 if (MIC_BUILD)
   ispc_generate_cxx (ISPC_SRCS 4 "knc-i1x16.h" ""
     Gradient.ispc
-    MarchingCubes.ispc
-    MarchingCubesV3.ispc
+    MarchingCubesISPC.ispc
   )
 else ()
-  ispc_compile (ISPC_OBJS ISPC_SRCS "--target=avx2-i32x8"
-    Gradient.ispc
-    MarchingCubes.ispc
-    MarchingCubesV3.ispc
+  ispc_compile (ISPC_OBJS ISPC_SRCS "--target=avx2-i32x16"
+    poisson.ispc
   )
 endif (MIC_BUILD)
 
@@ -35,17 +26,13 @@ include_directories (
   "${CMAKE_CURRENT_SOURCE_DIR}/../utils"
 )
 
-add_executable (MarchingCubes MACOSX_BUNDLE
-  MarchingCubes.cxx
-  MarchingCubesTables.cxx
-  MarchingCubesV2.cxx
-  MarchingCubesV3.cxx
-  MarchingCubesV3.1.cxx
+add_executable (poisson MACOSX_BUNDLE
   main.cxx
+  poisson.cxx
   ${ISPC_SRCS}
 )
 
-target_link_libraries (MarchingCubes
+target_link_libraries (poisson
   ${ISPC_OBJS}
   ${Boost_LIBRARIES}
 )

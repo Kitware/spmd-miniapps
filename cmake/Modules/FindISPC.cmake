@@ -26,7 +26,7 @@ function (ispc_compile OBJECTS HEADERS OPTIONS)
   else ("${CMAKE_BUILD_TYPE}" MATCHES "RelWithDebInfo")
     set (ispc_compile_flags
          ${ISPC_FLAGS} ${ISPC_FLAGS_RELWITHDEBINFO} ${OPTIONS})
-  endif ("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+  endif ()
 
   foreach (filename ${ARGN})
     get_filename_component (base ${filename} NAME)
@@ -45,7 +45,7 @@ function (ispc_compile OBJECTS HEADERS OPTIONS)
 
     list (APPEND LOBJECTS ${object})
     list (APPEND LHEADERS ${header})
-  endforeach (filename)
+  endforeach ()
 
   set(${OBJECTS} ${LOBJECTS} PARENT_SCOPE)
   set(${HEADERS} ${LHEADERS} PARENT_SCOPE)
@@ -78,7 +78,7 @@ function (ispc_generate_cxx SOURCES GANG_SIZE INTRINSICS_HEADER OPTIONS)
     set_source_files_properties (${header} GENERATED)
 
     list (APPEND LSOURCES ${source} ${header})
-  endforeach (filename)
+  endforeach ()
 
   set(${SOURCES} ${LSOURCES} PARENT_SCOPE)
   include_directories (${CMAKE_CURRENT_BINARY_DIR})
