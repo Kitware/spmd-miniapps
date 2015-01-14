@@ -1,13 +1,21 @@
 #include "MarchingCubes.h"
 #include "MarchingCubesTables.h"
-#include "MarchingCubesV3.ispc.h"
+#include "MarchingCubesV2.ispc.h"
 
 #include <boost/chrono.hpp>
+#include <boost/unordered_map.hpp>
 
 #include <iostream>
 #include <vector>
 
 typedef boost::chrono::steady_clock Clock;
+typedef boost::unordered_map<int, int> EdgeUnorderedMap;
+
+inline size_t estimateNumberOfBuckets(const int dims[3], float loadFactor)
+{
+  size_t estimatedNumOfVertexes = (dims[0] * dims[1] * dims[2])/32;
+  return estimatedNumOfVertexes/loadFactor;
+}
 
 inline void generateEdgeIdOffsets(int xdim, int xydim, int offsets[12])
 {
@@ -62,14 +70,12 @@ inline Float_t lerp(Float_t a, Float_t b, Float_t w)
   return a + (w * (b - a));
 }
 
-static const char * partDesc[] = { "Begin", "Compute case ids", 
+static const char * partDesc[] = { "Begin", "Compute case ids",
                                    "Remove empty cells and sort by caseId",
-                                   "Generate edges", 
-                                   "Remove invalid edges and sort by edge id",
-                                   "Merge duplicate edges, generate indexes",
+                                   "Generate edges and indexes",
                                    "Compute gradients and generate vertices" };
 
-namespace scalar_3 {
+namespace scalar_2_1 {
 
 struct CellInfo
 {
@@ -123,8 +129,6 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int everts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                    {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
   static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
                                        { 1, 1, 0}, { 0, 1, 0},
                                        { 0, 0, 1}, { 1, 0, 1},
@@ -139,7 +143,7 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   int edgeIdOffsets[12];
   generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
-  Clock::time_point checkpoints[7];
+  Clock::time_point checkpoints[5];
 
   // part 1: compute caseId of each cell
   checkpoints[0] = Clock::now();
@@ -186,70 +190,67 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   cellInfo.resize(newEnd - cellInfo.begin());
   std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
 
-  // part 3: generate edges
+  // part 3: generate edges and indexes
   checkpoints[2] = Clock::now();
 
   ncells = cellInfo.size();
-  std::vector<EdgeInfo> edgeInfo(ncells * 15);
+  std::vector<EdgeInfo> edgeInfo;
+  std::vector<int> indexes;
+
+  //int estimatedNumberOfTriangle = ncells * 2;
+  //edgeInfo.reserve((estimatedNumberOfTriangle * 3)/2);
+  //indexes.reserve(estimatedNumberOfTriangle * 3);
+
+#define USE_HASH_TABLE 1
+#if USE_HASH_TABLE
+  const Float_t loadFactor = 1.0;
+  EdgeUnorderedMap edgeMap(estimateNumberOfBuckets(dims, loadFactor));
+  edgeMap.max_load_factor(loadFactor);
+#else
+  std::vector<int> edgeMap(dims[0] * dims[1] * dims[2] * 3, -1);
+#endif
+
   for (int i = 0, pos = 0; i < ncells; ++i)
     {
-    int idx = i * 15;
-
     const CellInfo &ci = cellInfo[i];
+    const int *edges = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
                    3;
 
-    const int *edgeIds =
-      MarchingCubesTables::getTriangleCases()[ci.caseId];
-    for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
+    for (; *edges != -1; ++edges)
       {
-      EdgeInfo &ei = edgeInfo[idx];
-      if (*edgeIds == -1)
+      int edgeUid = baseEdge + edgeIdOffsets[*edges];
+#if USE_HASH_TABLE
+      EdgeUnorderedMap::iterator loc = edgeMap.find(edgeUid);
+      if (loc != edgeMap.end())
         {
-        ei.edgeId = -1;
+        indexes.push_back(loc->second);
         }
+#else
+      if (edgeMap[edgeUid] != -1)
+        {
+        indexes.push_back(edgeMap[edgeUid]);
+        }
+#endif
       else
         {
-        ei.edgeId = baseEdge + edgeIdOffsets[*edgeIds];
-
+        EdgeInfo ei;
+        ei.edgeId = edgeUid;
         ei.idx[0] = ci.idx[0];
         ei.idx[1] = ci.idx[1];
         ei.idx[2] = ci.idx[2];
-        ei.idx[3] = *edgeIds;
+        ei.idx[3] = *edges;
+        ei.pos = pos;
 
-        ei.pos = pos++;
+        edgeInfo.push_back(ei);
+        edgeMap[edgeUid] = pos;
+        indexes.push_back(pos++);
         }
       }
     }
 
-  // part 4: remove invalid edges and sort by unique edgeId
+  // part 4: compute gradients and generate vertices
   checkpoints[3] = Clock::now();
-
-  std::vector<EdgeInfo>::iterator newEnd1
-    = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
-  edgeInfo.resize(newEnd1 - edgeInfo.begin());
-  std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
-
-  // part 5: merge duplicate edges, generate indexes
-  checkpoints[4] = Clock::now();
-
-  std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0;
-  for (size_t i = 0; i < edgeInfo.size(); ++i)
-    {
-    if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
-      {
-      if (++last != i)
-        {
-        edgeInfo[last] = edgeInfo[i];
-        }
-      }
-    indexes[edgeInfo[i].pos] = last;
-    }
-  edgeInfo.resize(last + 1);
-
-  // part 6: compute gradients and generate vertices
-  checkpoints[5] = Clock::now();
 
   std::vector<Float_t> points, normals;
   points.reserve(edgeInfo.size() * 3);
@@ -260,7 +261,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     const EdgeInfo &ei = edgeInfo[i];
 
     int p1idx[3], p2idx[3];
-    int p1 = everts[ei.idx[3]][0], p2 = everts[ei.idx[3]][1];
+    int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
+    int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[1];
     p1idx[0] = ei.idx[0] + idxOffset[p1][0];
     p1idx[1] = ei.idx[1] + idxOffset[p1][1];
     p1idx[2] = ei.idx[2] + idxOffset[p1][2];
@@ -286,15 +288,15 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
       }
     }
 
-  checkpoints[6] = Clock::now();
+  checkpoints[4] = Clock::now();
 
   mesh->points.swap(points);
   mesh->normals.swap(normals);
   mesh->indexes.swap(indexes);
 
-  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
+  boost::chrono::duration<double> total = checkpoints[4] - checkpoints[0];
   std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
-  for (int i = 1; i < 7; ++i)
+  for (int i = 1; i < 5; ++i)
     {
     boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
     double pc = (100.0 * dur.count())/total.count();
@@ -303,9 +305,9 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 }
 
-}; //namespace scalar_3
+}; //namespace scalar_2_1
 
-namespace mixed_3 {
+namespace simd_2_1 {
 
 using ispc::CellInfo;
 
@@ -355,8 +357,6 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int everts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                    {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
   static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
                                        { 1, 1, 0}, { 0, 1, 0},
                                        { 0, 0, 1}, { 1, 0, 1},
@@ -394,66 +394,48 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   checkpoints[2] = Clock::now();
 
   ncells = cellInfo.size();
-  std::vector<EdgeInfo> edgeInfo(ncells * 15);
+  std::vector<EdgeInfo> edgeInfo;
+  std::vector<int> indexes;
+
+  const Float_t loadFactor = 1.0;
+  EdgeUnorderedMap edgeMap(estimateNumberOfBuckets(dims, loadFactor));
+  edgeMap.max_load_factor(loadFactor);
+
   for (int i = 0, pos = 0; i < ncells; ++i)
     {
-    int idx = i * 15;
-
     const CellInfo &ci = cellInfo[i];
+    const int *edges = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
                    3;
 
-    const int *edgeIds =
-      MarchingCubesTables::getTriangleCases()[ci.caseId];
-    for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
+    for (; *edges != -1; ++edges)
       {
-      EdgeInfo &ei = edgeInfo[idx];
-      if (*edgeIds == -1)
+      int edgeUid = baseEdge + edgeIdOffsets[*edges];
+
+      EdgeUnorderedMap::iterator loc = edgeMap.find(edgeUid);
+      if (loc != edgeMap.end())
         {
-        ei.edgeId = -1;
+        indexes.push_back(loc->second);
         }
       else
         {
-        ei.edgeId = baseEdge + edgeIdOffsets[*edgeIds];
-
+        EdgeInfo ei;
+        ei.edgeId = edgeUid;
         ei.idx[0] = ci.idx[0];
         ei.idx[1] = ci.idx[1];
         ei.idx[2] = ci.idx[2];
-        ei.idx[3] = *edgeIds;
+        ei.idx[3] = *edges;
+        ei.pos = pos;
 
-        ei.pos = pos++;
+        edgeInfo.push_back(ei);
+        edgeMap[edgeUid] = pos;
+        indexes.push_back(pos++);
         }
       }
     }
 
-  // part 4: remove invalid edges and sort by unique edgeId
+  // part 4: compute gradients and generate vertices
   checkpoints[3] = Clock::now();
-
-  std::vector<EdgeInfo>::iterator newEnd1
-    = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
-  edgeInfo.resize(newEnd1 - edgeInfo.begin());
-  std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
-
-  // part 5: merge duplicate edges, generate indexes
-  checkpoints[4] = Clock::now();
-
-  std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0;
-  for (size_t i = 0; i < edgeInfo.size(); ++i)
-    {
-    if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
-      {
-      if (++last != i)
-        {
-        edgeInfo[last] = edgeInfo[i];
-        }
-      }
-    indexes[edgeInfo[i].pos] = last;
-    }
-  edgeInfo.resize(last + 1);
-
-  // part 6: compute gradients and generate vertices
-  checkpoints[5] = Clock::now();
 
   std::vector<Float_t> points, normals;
   points.reserve(edgeInfo.size() * 3);
@@ -464,7 +446,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     const EdgeInfo &ei = edgeInfo[i];
 
     int p1idx[3], p2idx[3];
-    int p1 = everts[ei.idx[3]][0], p2 = everts[ei.idx[3]][1];
+    int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
+    int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
     p1idx[0] = ei.idx[0] + idxOffset[p1][0];
     p1idx[1] = ei.idx[1] + idxOffset[p1][1];
     p1idx[2] = ei.idx[2] + idxOffset[p1][2];
@@ -490,15 +473,15 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
       }
     }
 
-  checkpoints[6] = Clock::now();
+  checkpoints[4] = Clock::now();
 
   mesh->points.swap(points);
   mesh->normals.swap(normals);
   mesh->indexes.swap(indexes);
 
-  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
+  boost::chrono::duration<double> total = checkpoints[4] - checkpoints[0];
   std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
-  for (int i = 1; i < 7; ++i)
+  for (int i = 1; i < 5; ++i)
     {
     boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
     double pc = (100.0 * dur.count())/total.count();
@@ -507,5 +490,5 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 }
 
-}; //namespace mixed_3
+}; //namespace simd_2_1
 

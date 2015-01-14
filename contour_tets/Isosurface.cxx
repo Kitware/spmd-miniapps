@@ -211,7 +211,7 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
 }; // namespace scalar
 
 
-namespace vectorized
+namespace simd
 {
 
 const int GANG_SIZE = ISPC_GANG_SIZE;
@@ -309,8 +309,7 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
       tetinfo_soa[g].pts[ii][2][gm] = tetmesh.points[ptidx + 2];
       }
 
-    numTriangles +=
-      (MarchingTetsTables::getCaseTrianglesEdges(caseId)[3] == -1) ? 1 : 2;
+    numTriangles += MarchingTetsTables::getNumberOfTriangles(caseId);
     }
 
   int numVerts = numTriangles * 3;
@@ -389,11 +388,11 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
   trimesh->indexes.swap(triIndexes);
 }
 
-}; // namespace vectorized
+}; // namespace simd
 
 
 
-namespace vectorized_2
+namespace simd_2
 {
 
 struct TriMeshHandle
@@ -457,6 +456,6 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     }
 }
 
-}; // namespace vectorized_2
+}; // namespace simd_2
 
 

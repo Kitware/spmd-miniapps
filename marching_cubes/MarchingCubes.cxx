@@ -1,6 +1,6 @@
-#include "Gradient.ispc.h"
 #include "MarchingCubes.h"
 #include "MarchingCubes.ispc.h"
+#include "MarchingCubesShortVec.ispc.h"
 #include "MarchingCubesTables.h"
 
 #include <PointLocator3D.h>
@@ -97,8 +97,6 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int everts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                    {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
 
   const int *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
@@ -205,13 +203,14 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                         grad[7]);
 
         // get the triangles to generate
-        const int *edges = MarchingCubesTables::getTriangleCases()[cellId];
+        const int *edges = MarchingCubesTables::getCaseTrianglesEdges(cellId);
         for (; *edges != -1; edges += 3)
           {
           int tri[3];
           for (int i = 0; i < 3; ++i)
             {
-            int v1 = everts[edges[i]][0], v2 = everts[edges[i]][1];
+            int v1 = MarchingCubesTables::getEdgeVertices(edges[i])[0];
+            int v2 = MarchingCubesTables::getEdgeVertices(edges[i])[1];
             Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
 
             // interpolate vertex position
@@ -263,14 +262,13 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 
 }; //namespace scalar
 
-namespace mixed {
+namespace shortvec {
 
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int everts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                    {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
+
   const int *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
@@ -370,13 +368,14 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                               grad);
 
         // get the triangles to generate
-        const int *edges = MarchingCubesTables::getTriangleCases()[cellId];
+        const int *edges = MarchingCubesTables::getCaseTrianglesEdges(cellId);
         for (; *edges != -1; edges += 3)
           {
           int tri[3];
           for (int i = 0; i < 3; ++i)
             {
-            int v1 = everts[edges[i]][0], v2 = everts[edges[i]][1];
+            int v1 = MarchingCubesTables::getEdgeVertices(edges[i])[0];
+            int v2 = MarchingCubesTables::getEdgeVertices(edges[i])[1];
             Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
 
             // interpolate vertex position
@@ -421,9 +420,9 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 }
 
-}; // namespace mixed
+}; // namespace shortvec
 
-namespace vectorized {
+namespace simd {
 
 struct VertexId
 {
@@ -466,7 +465,7 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
       cellIndex[s] = d;
       vertInds[s] = ntris * 3 * 3;
       cases[s++] = cases[d];
-      ntris += MarchingCubesTables::getTrianglesPerCase()[cases[d]];
+      ntris += MarchingCubesTables::getNumberOfTriangles(cases[d]);
       }
     }
   cases.resize(activeCells);
@@ -475,7 +474,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   std::vector<Float_t> points(nverts * 3), normals(nverts * 3);
 
   ispc::extractIsosurface_impl(buffer, dims, origin, spacing, isoval,
-                               MarchingCubesTables::getTriangleCases()[0],
+                               MarchingCubesTables::getCaseTrianglesEdges(0),
+                               MarchingCubesTables::getEdgeVertices(0),
                                activeCells, &(cellIndex[0]), &(cases[0]),
                                &(vertInds[0]), &(points[0]), &normals[0]);
 
@@ -526,5 +526,5 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 }
 
-}; // namespace vectorized
+}; // namespace simd
 

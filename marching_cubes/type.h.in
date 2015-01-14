@@ -6,7 +6,13 @@
 # include <TriangleMesh.h>
 #endif
 
+#cmakedefine MARCHING_CUBES_TYPE_DOUBLE
+
+#ifdef MARCHING_CUBES_TYPE_DOUBLE
 typedef double Float_t;
+#else
+typedef float Float_t;
+#endif
 
 #if !ISPC
 typedef Image3D<Float_t> Image3D_t;

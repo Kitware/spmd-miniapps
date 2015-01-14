@@ -1,0 +1,13 @@
+#ifndef __type_h
+#define __type_h
+
+#cmakedefine POISSON_SOLVER_TYPE_DOUBLE
+
+#ifdef POISSON_SOLVER_TYPE_DOUBLE
+typedef double Float_t;
+#else
+typedef float Float_t;
+#endif
+
+#endif
+

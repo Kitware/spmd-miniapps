@@ -152,7 +152,7 @@ export void normalizeNormals(uniform Float_t normals[], uniform int count)
 }
 
 
-extern "C" void addTriangleToOutput(void* uniform trimeshHandle, 
+extern "C" void addTriangleToOutput(void* uniform trimeshHandle,
                                     uniform Float_t verts[3][3],
                                     uniform int keys[3][2],
                                     uniform Float_t normal[3]);

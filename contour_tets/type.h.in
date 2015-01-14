@@ -6,7 +6,13 @@
 # include <TriangleMesh.h>
 #endif
 
+#cmakedefine TET_MESH_CONT_TYPE_DOUBLE
+
+#ifdef TET_MESH_CONT_TYPE_DOUBLE
 typedef double Float_t;
+#else
+typedef float Float_t;
+#endif
 
 #if !ISPC
 typedef TetrahedronMesh<Float_t> TetrahedronMesh_t;

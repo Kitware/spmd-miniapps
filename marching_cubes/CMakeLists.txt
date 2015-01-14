@@ -13,25 +13,37 @@ set (EXTRA_COMPILER_FLAGS
   "-Wall -Wextra -Wstrict-aliasing -Wno-unused"
   CACHE STRING ""
 )
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${EXTRA_COMPILER_FLAGS}")
+add_definitions (${EXTRA_COMPILER_FLAGS})
+
+set (MARCHING_CUBES_TYPE_DOUBLE ON CACHE BOOL "")
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/type.h.in ${CMAKE_CURRENT_BINARY_DIR}/type.h
+)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+set (ISPC_SOURCE_FILES
+  "MarchingCubes.ispc"
+  "MarchingCubesShortVec.ispc"
+  "MarchingCubesV2.ispc"
+)
 
 if (MIC_BUILD)
-  ispc_generate_cxx (ISPC_SRCS 4 "knc-i1x16.h" ""
-    Gradient.ispc
-    MarchingCubes.ispc
-    MarchingCubesV3.ispc
+  ispc_generate_cxx (ISPC_SRCS
+    "16"
+    "knc-i1x16.h"
+    "-I${CMAKE_CURRENT_BINARY_DIR}"
+    ${ISPC_SOURCE_FILES}
   )
+  include_directories("${ISPC_ROOT}/examples/intrinsics")
 else ()
-  ispc_compile (ISPC_OBJS ISPC_SRCS "--target=avx2-i32x8"
-    Gradient.ispc
-    MarchingCubes.ispc
-    MarchingCubesV3.ispc
+  ispc_compile (ISPC_OBJS ISPC_SRCS
+    "--target=avx2-i32x8 -I${CMAKE_CURRENT_BINARY_DIR}"
+    ${ISPC_SOURCE_FILES}
   )
 endif (MIC_BUILD)
 
 include_directories (
   ${Boost_INCLUDE_DIRS}
-  "${ISPC_ROOT}/examples/intrinsics"
   "${CMAKE_CURRENT_SOURCE_DIR}/../utils"
 )
 
@@ -39,8 +51,7 @@ add_executable (MarchingCubes MACOSX_BUNDLE
   MarchingCubes.cxx
   MarchingCubesTables.cxx
   MarchingCubesV2.cxx
-  MarchingCubesV3.cxx
-  MarchingCubesV3.1.cxx
+  MarchingCubesV2.1.cxx
   main.cxx
   ${ISPC_SRCS}
 )

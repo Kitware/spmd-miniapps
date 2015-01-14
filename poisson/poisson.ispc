@@ -114,7 +114,7 @@ export void solvePoisson_impl(uniform const Float_t div[], uniform int xdim,
   foreach (j = 0 ... ydim, i = 0 ... xdim)
     {
     int idx = (j * xdim) + i;
-    sol[idx] = clamp(sol[idx], 0.0, 255.0);
+    sol[idx] = clamp(sol[idx], (Float_t)0.0, (Float_t)255.0);
     }
 }
 

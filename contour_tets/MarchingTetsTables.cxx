@@ -22,3 +22,8 @@ const int MarchingTetsTables::caseTrianglesEdges[16][7] = {
   {-1, -1, -1, -1, -1, -1, -1}
 };
 
+const int MarchingTetsTables::numberOfTriangles[16] = { 0, 1, 1, 2,
+                                                        1, 2, 2, 1,
+                                                        1, 2, 2, 1,
+                                                        2, 1, 1, 0 };
+

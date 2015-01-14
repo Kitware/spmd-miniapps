@@ -1,8 +1,8 @@
 #include "MarchingCubes.h"
 #include "MarchingCubesTables.h"
+#include "MarchingCubesV2.ispc.h"
 
 #include <boost/chrono.hpp>
-#include <boost/unordered_map.hpp>
 
 #include <iostream>
 #include <vector>
@@ -25,63 +25,36 @@ inline void generateEdgeIdOffsets(int xdim, int xydim, int offsets[12])
   offsets[11] = (3 * (xdim + 1)) + 2;
 }
 
-inline size_t estimateNumberOfBuckets(const int dims[3], float loadFactor)
+static void computePosition(const int idx[3], const Float_t origin[3],
+                            const Float_t spacing[3], Float_t pos[3])
 {
-  size_t estimatedNumOfVertexes = (dims[0] * dims[1] * dims[2])/32;
-  return estimatedNumOfVertexes/loadFactor;
+  pos[0] = origin[0] + (static_cast<Float_t>(idx[0]) * spacing[0]);
+  pos[1] = origin[1] + (static_cast<Float_t>(idx[1]) * spacing[1]);
+  pos[2] = origin[2] + (static_cast<Float_t>(idx[2]) * spacing[2]);
 }
 
-struct PointInfo
-{
-  Float_t pos[3];
-  Float_t val;
-  Float_t grad[3];
-};
-
-struct EdgeInfo
-{
-  PointInfo pt1, pt2;
-};
-
-typedef boost::unordered_map<int, int> EdgeUnorderedMap;
-
-inline void createPointInfo(Float_t xpos, Float_t ypos, Float_t zpos,
-                            Float_t val, PointInfo *p)
-{
-  p->pos[0] = xpos;
-  p->pos[1] = ypos;
-  p->pos[2] = zpos;
-  p->val = val;
-}
-
-static void computeGradient(int xidx, int yidx, int zidx, int idx,
-                            const Float_t cachedVals[8],
-                            const Float_t *buffer, const int dims[3],
-                            const Float_t spacing[3],
+static void computeGradient(const int idx[3], const Float_t *buffer,
+                            const int dims[3], const Float_t spacing[3],
                             Float_t grad[3])
 {
+  int flatIdx = idx[0] + (idx[1] * dims[0]) + (idx[2] * dims[0] * dims[1]);
   Float_t v1, v2, fac;
 
-  v1 = (xidx > 0) ? buffer[idx - 1] : cachedVals[0];
-  v2 = (xidx < (dims[0] - 1)) ? cachedVals[1] : cachedVals[0];
-  fac = (xidx > 0 && xidx < (dims[0] - 1)) ? 2.0 : 1.0;
+  v1 = (idx[0] > 0) ? buffer[flatIdx - 1] : buffer[flatIdx];
+  v2 = (idx[0] < (dims[0] - 1)) ? buffer[flatIdx + 1] : buffer[flatIdx];
+  fac = (idx[0] > 0 && idx[0] < (dims[0] - 1)) ? 2.0 : 1.0;
   grad[0] = (v1 - v2)/(fac * spacing[0]);
 
-  v1 = (yidx > 0) ? buffer[idx - dims[0]] : cachedVals[0];
-  v2 = (yidx < (dims[1] - 1)) ? cachedVals[3] : cachedVals[0];
-  fac = (yidx > 0 && yidx < (dims[1] - 1)) ? 2.0 : 1.0;
+  v1 = (idx[1] > 0) ? buffer[flatIdx - dims[0]] : buffer[flatIdx];
+  v2 = (idx[1] < (dims[1] - 1)) ? buffer[flatIdx + dims[0]] : buffer[flatIdx];
+  fac = (idx[1] > 0 && idx[1] < (dims[1] - 1)) ? 2.0 : 1.0;
   grad[1] = (v1 - v2)/(fac * spacing[1]);
 
-  v1 = (zidx > 0) ? buffer[idx - (dims[0] * dims[1])] : cachedVals[0];
-  v2 = (zidx < (dims[2] - 1)) ? cachedVals[4] : cachedVals[0];
-  fac = (zidx > 0 && zidx < (dims[2] - 1)) ? 2.0 : 1.0;
+  v1 = (idx[2] > 0) ? buffer[flatIdx - (dims[0] * dims[1])] : buffer[flatIdx];
+  v2 = (idx[2] < (dims[2] - 1)) ? buffer[flatIdx + (dims[0] * dims[1])]
+                                : buffer[flatIdx];
+  fac = (idx[2] > 0 && idx[2] < (dims[2] - 1)) ? 2.0 : 1.0;
   grad[2] = (v1 - v2)/(fac * spacing[2]);
-}
-
-inline bool intersects(Float_t p1val, Float_t p2val, Float_t isoval)
-{
-  return ((p1val >= isoval && p2val < isoval) ||
-          (p2val >= isoval && p1val < isoval));
 }
 
 inline Float_t lerp(Float_t a, Float_t b, Float_t w)
@@ -89,247 +62,446 @@ inline Float_t lerp(Float_t a, Float_t b, Float_t w)
   return a + (w * (b - a));
 }
 
+static const char * partDesc[] = { "Begin", "Compute case ids",
+                                   "Remove empty cells and sort by caseId",
+                                   "Generate edges",
+                                   "Remove invalid edges and sort by edge id",
+                                   "Merge duplicate edges, generate indexes",
+                                   "Compute gradients and generate vertices" };
+
 namespace scalar_2 {
 
-void extractIsosurface(const Image3D_t &vol, Float_t isoval, TriangleMesh_t *mesh)
+struct CellInfo
+{
+  int idx[3];
+  int caseId;
+};
+
+class CaseIdIsLess
+{
+public:
+  bool operator()(const CellInfo &c1, const CellInfo &c2) const
+  {
+    return (c1.caseId < c2.caseId);
+  }
+};
+
+class CellIsEmpty
+{
+public:
+  bool operator()(const CellInfo &c) const
+  {
+    return (c.caseId == 0 || c.caseId == 255);
+  }
+};
+
+struct EdgeInfo
+{
+  int edgeId, pos;
+  int idx[4];
+};
+
+class EdgeIsInvalid
+{
+public:
+  bool operator()(const EdgeInfo &e) const
+  {
+    return (e.edgeId == -1);
+  }
+};
+
+class EdgeIdIsLess
+{
+public:
+  bool operator()(const EdgeInfo &e1, const EdgeInfo &e2) const
+  {
+    return (e1.edgeId < e2.edgeId);
+  }
+};
+
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int everts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                    {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
+  static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
+                                       { 1, 1, 0}, { 0, 1, 0},
+                                       { 0, 0, 1}, { 1, 0, 1},
+                                       { 1, 1, 1}, { 0, 1, 1} };
 
   const int *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
   const Float_t *buffer = vol.getData();
-  int sliceSize = dims[0] * dims[1];
+  int xydim = dims[0] * dims[1];
 
   int edgeIdOffsets[12];
-  generateEdgeIdOffsets(dims[0], sliceSize, edgeIdOffsets);
+  generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
-  Clock::time_point start, middle, finish;
-  start = Clock::now();
+  Clock::time_point checkpoints[7];
 
-  std::vector<int> indexes;
-  std::vector<Float_t> points, normals;
+  // part 1: compute caseId of each cell
+  checkpoints[0] = Clock::now();
 
-  std::vector<EdgeInfo> edges;
+  int ncells = (dims[0] - 1) * (dims[1] - 1) * (dims[2] - 1);
+  std::vector<CellInfo> cellInfo;
+  cellInfo.reserve(ncells);
 
-  const Float_t loadFactor = 1.0;
-  EdgeUnorderedMap edgeMap(estimateNumberOfBuckets(dims, loadFactor));
-  edgeMap.max_load_factor(loadFactor);
-
-#if 0
-  std::cout << "nbuckets: " << edgeMap.bucket_count()
-            << ", estimate: " << estimateNumberOfBuckets(dims, loadFactor)
-            << ", maxbuckets: " << edgeMap.max_bucket_count()
-            << ", loadFactor: " << edgeMap.load_factor()
-            << ", maxloadfactor: " << edgeMap.max_load_factor()
-            << ", maxsize: " << edgeMap.max_size()
-            << std::endl;
-#endif
-
-  Float_t zpos = origin[2];
-  for (int zidx = 0, idx = 0; zidx < dims[2]; ++zidx, zpos += spacing[2])
+  for (int zidx = 0; zidx < (dims[2] - 1); ++zidx)
     {
-    Float_t ypos = origin[1];
-    for (int yidx = 0; yidx < dims[1]; ++yidx, ypos += spacing[1])
+    for (int yidx = 0; yidx < (dims[1] - 1); ++yidx)
       {
-      Float_t xpos = origin[0];
-      for (int xidx = 0; xidx < dims[0]; ++xidx, ++idx, xpos += spacing[0])
+      for (int xidx = 0; xidx < (dims[0] - 1); ++xidx)
         {
         Float_t val[8];
+        int idx = xidx + (yidx * dims[0]) + (zidx * xydim);
+
         val[0] = buffer[idx];
+        val[1] = buffer[idx + 1];
+        val[2] = buffer[idx + 1 + dims[0]];
+        val[3] = buffer[idx + dims[0]];
+        val[4] = buffer[idx + xydim];
+        val[5] = buffer[idx + 1 + xydim];
+        val[6] = buffer[idx + 1 + dims[0] + xydim];
+        val[7] = buffer[idx + dims[0] + xydim];
 
-        int edgeId = idx * 3;
-        int edgexsects[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-        bool isCell = false, skipOutEdges = false;
-        if (xidx < (dims[0] - 1) && yidx < (dims[1] - 1) &&
-            zidx < (dims[2] - 1))
+        int caseId = 0;
+        for (int i = 0; i < 8; ++i)
           {
-          isCell = true;
-          val[1] = buffer[idx + 1];
-          val[2] = buffer[idx + dims[0] + 1];
-          val[3] = buffer[idx + dims[0]];
-          val[4] = buffer[idx + sliceSize];
-          val[5] = buffer[idx + 1 + sliceSize];
-          val[6] = buffer[idx + dims[0] + 1 + sliceSize];
-          val[7] = buffer[idx + dims[0] + sliceSize];
-
-          // compute cell case based on isosurface intersection with the edges
-          int caseId = 0;
-          for (int i = 0; i < 8; ++i)
-            {
-            caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
-            }
-
-           if (caseId != 0 && caseId != 255)
-            {
-            const int *eids = MarchingCubesTables::getTriangleCases()[caseId];
-            for (; *eids != -1; ++eids)
-              {
-              indexes.push_back(edgeId + edgeIdOffsets[*eids]);
-              edgexsects[*eids] = 1;
-              }
-            }
-          else
-            {
-            skipOutEdges = true;
-            }
+          caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
           }
 
-        bool needPointGradient = false;
-        int outEdges[3] = { -1, -1, -1 };
-        if (!skipOutEdges)
-          {
-          bool xsects = false;
-          if (xidx < (dims[0] - 1))
-            {
-            if (isCell)
-              {
-              xsects = edgexsects[0];
-              }
-            else
-              {
-              val[1] = buffer[idx + 1];
-              xsects = intersects(val[0], val[1], isoval);
-              }
-            if (xsects)
-              {
-              EdgeInfo e;
-              createPointInfo(xpos, ypos, zpos, val[0], &e.pt1);
-              createPointInfo(xpos + spacing[0], ypos, zpos, val[1], &e.pt2);
-
-              outEdges[0] = edgeMap[edgeId] = edges.size();
-              edges.push_back(e);
-              needPointGradient = true;
-              }
-            }
-          if (yidx < (dims[1] - 1))
-            {
-            if (isCell)
-              {
-              xsects = edgexsects[3];
-              }
-            else
-              {
-              val[3] = buffer[idx + dims[0]];
-              xsects = intersects(val[0], val[3], isoval);
-              }
-            if (xsects)
-              {
-              EdgeInfo e;
-              createPointInfo(xpos, ypos, zpos, val[0], &e.pt1);
-              createPointInfo(xpos, ypos + spacing[1], zpos, val[3], &e.pt2);
-
-              outEdges[1] = edgeMap[edgeId + 1] = edges.size();
-              edges.push_back(e);
-              needPointGradient = true;
-              }
-            }
-          if (zidx < (dims[2] - 1))
-            {
-            if (isCell)
-              {
-              xsects = edgexsects[8];
-              }
-            else
-              {
-              val[4] = buffer[idx + sliceSize];
-              xsects = intersects(val[0], val[4], isoval);
-              }
-            if (xsects)
-              {
-              EdgeInfo e;
-              createPointInfo(xpos, ypos, zpos, val[0], &e.pt1);
-              createPointInfo(xpos, ypos, zpos + spacing[2], val[4], &e.pt2);
-
-              outEdges[2] = edgeMap[edgeId + 2] = edges.size();
-              edges.push_back(e);
-              needPointGradient = true;
-              }
-            }
-          }
-
-        int inEdges[3] = { -1, -1, -1 };
-        int inEdgeIds[3] = { (idx - 1) * 3,
-                             ((idx - dims[0]) * 3) + 1,
-                             ((idx - sliceSize) * 3) + 2 };
-        for (int i = 0; i < 3; ++i)
-          {
-          EdgeUnorderedMap::iterator loc = edgeMap.find(inEdgeIds[i]);
-          if (loc != edgeMap.end())
-            {
-            inEdges[i] = loc->second;
-            needPointGradient = true;
-            }
-          }
-
-        if (needPointGradient)
-          {
-          Float_t grad[3];
-          computeGradient(xidx, yidx, zidx, idx, val, buffer, dims, spacing,
-                          grad);
-          for (int i = 0; i < 3; ++i)
-            {
-            if (inEdges[i] != -1)
-              {
-              edges[inEdges[i]].pt2.grad[0] = grad[0];
-              edges[inEdges[i]].pt2.grad[1] = grad[1];
-              edges[inEdges[i]].pt2.grad[2] = grad[2];
-              }
-            if (outEdges[i] != -1)
-              {
-              edges[outEdges[i]].pt1.grad[0] = grad[0];
-              edges[outEdges[i]].pt1.grad[1] = grad[1];
-              edges[outEdges[i]].pt1.grad[2] = grad[2];
-              }
-            }
-          }
+        CellInfo ci = { { xidx, yidx, zidx}, caseId };
+        cellInfo.push_back(ci);
         }
       }
     }
 
-  for (unsigned i = 0; i < indexes.size(); ++i)
+  // part 2: remove empty cells and sort by caseId
+  checkpoints[1] = Clock::now();
+
+  std::vector<CellInfo>::iterator newEnd
+    = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
+  cellInfo.resize(newEnd - cellInfo.begin());
+  std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
+
+  // part 3: generate edges
+  checkpoints[2] = Clock::now();
+
+  ncells = cellInfo.size();
+  std::vector<EdgeInfo> edgeInfo(ncells * 15);
+  for (int i = 0, pos = 0; i < ncells; ++i)
     {
-    indexes[i] = edgeMap.at(indexes[i]);
-    }
+    int idx = i * 15;
 
-  middle = Clock::now();
+    const CellInfo &ci = cellInfo[i];
+    int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
+                   3;
 
-  points.reserve(edges.size() * 3);
-  normals.reserve(edges.size() * 3);
-  for (unsigned i = 0; i < edges.size(); ++i)
-    {
-    const EdgeInfo &edge = edges[i];
-
-    Float_t w = (isoval - edge.pt1.val)/(edge.pt2.val - edge.pt1.val);
-    for (int ii = 0; ii < 3; ++ii)
+    const int *edgeIds = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
+    for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
       {
-      points.push_back(lerp(edge.pt1.pos[ii], edge.pt2.pos[ii], w));
-      normals.push_back(lerp(edge.pt1.grad[ii], edge.pt2.grad[ii], w));
+      EdgeInfo &ei = edgeInfo[idx];
+      if (*edgeIds == -1)
+        {
+        ei.edgeId = -1;
+        }
+      else
+        {
+        ei.edgeId = baseEdge + edgeIdOffsets[*edgeIds];
+
+        ei.idx[0] = ci.idx[0];
+        ei.idx[1] = ci.idx[1];
+        ei.idx[2] = ci.idx[2];
+        ei.idx[3] = *edgeIds;
+
+        ei.pos = pos++;
+        }
       }
     }
+
+  // part 4: remove invalid edges and sort by unique edgeId
+  checkpoints[3] = Clock::now();
+
+  std::vector<EdgeInfo>::iterator newEnd1
+    = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
+  edgeInfo.resize(newEnd1 - edgeInfo.begin());
+  std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
+
+  // part 5: merge duplicate edges, generate indexes
+  checkpoints[4] = Clock::now();
+
+  std::vector<int> indexes(edgeInfo.size());
+  size_t last = 0;
+  for (size_t i = 0; i < edgeInfo.size(); ++i)
+    {
+    if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
+      {
+      if (++last != i)
+        {
+        edgeInfo[last] = edgeInfo[i];
+        }
+      }
+    indexes[edgeInfo[i].pos] = last;
+    }
+  edgeInfo.resize(last + 1);
+
+  // part 6: compute gradients and generate vertices
+  checkpoints[5] = Clock::now();
+
+  std::vector<Float_t> points, normals;
+  points.reserve(edgeInfo.size() * 3);
+  normals.reserve(edgeInfo.size() * 3);
+
+  for (size_t i = 0;  i < edgeInfo.size(); ++i)
+    {
+    const EdgeInfo &ei = edgeInfo[i];
+
+    int p1idx[3], p2idx[3];
+    int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
+    int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[1];
+    p1idx[0] = ei.idx[0] + idxOffset[p1][0];
+    p1idx[1] = ei.idx[1] + idxOffset[p1][1];
+    p1idx[2] = ei.idx[2] + idxOffset[p1][2];
+    p2idx[0] = ei.idx[0] + idxOffset[p2][0];
+    p2idx[1] = ei.idx[1] + idxOffset[p2][1];
+    p2idx[2] = ei.idx[2] + idxOffset[p2][2];
+
+    int p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
+    int p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
+    Float_t w = (isoval - buffer[p1FlatIdx]) /
+               (buffer[p2FlatIdx] - buffer[p1FlatIdx]);
+
+    Float_t pos1[3], pos2[3], grad1[3], grad2[3];
+    computePosition(p1idx, origin, spacing, pos1);
+    computeGradient(p1idx, buffer, dims, spacing, grad1);
+    computePosition(p2idx, origin, spacing, pos2);
+    computeGradient(p2idx, buffer, dims, spacing, grad2);
+
+    for (int ii = 0; ii < 3; ++ii)
+      {
+      points.push_back(lerp(pos1[ii], pos2[ii], w));
+      normals.push_back(lerp(grad1[ii], grad2[ii], w));
+      }
+    }
+
+  checkpoints[6] = Clock::now();
 
   mesh->points.swap(points);
   mesh->normals.swap(normals);
   mesh->indexes.swap(indexes);
 
-  finish = Clock::now();
-
-  boost::chrono::duration<double> part1 = middle - start;
-  boost::chrono::duration<double> part2 = finish - middle;
-  std::cout << "part1 cost: " << part1 << ", part2 cost: " << part2
-            << std::endl;
-
-#if 0
-  std::cout << "nbuckets: " << edgeMap.bucket_count()
-            << ", loadFactor: " << edgeMap.load_factor()
-            << ", maxloadfactor: " << edgeMap.max_load_factor()
-            << ", size: " << edgeMap.size()
-            << std::endl;
-#endif
+  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
+  std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
+  for (int i = 1; i < 7; ++i)
+    {
+    boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
+    double pc = (100.0 * dur.count())/total.count();
+    std::cout << "Part " << i << " - " << partDesc[i] << ": "
+              << dur.count() << " seconds, " << pc << "%" << std::endl;
+    }
 }
 
 }; //namespace scalar_2
+
+namespace simd_2 {
+
+using ispc::CellInfo;
+
+class CaseIdIsLess
+{
+public:
+  bool operator()(const CellInfo &c1, const CellInfo &c2) const
+  {
+    return (c1.caseId < c2.caseId);
+  }
+};
+
+class CellIsEmpty
+{
+public:
+  bool operator()(const CellInfo &c) const
+  {
+    return (c.caseId == 0 || c.caseId == 255);
+  }
+};
+
+struct EdgeInfo
+{
+  int edgeId, pos;
+  int idx[4];
+};
+
+class EdgeIsInvalid
+{
+public:
+  bool operator()(const EdgeInfo &e) const
+  {
+    return (e.edgeId == -1);
+  }
+};
+
+class EdgeIdIsLess
+{
+public:
+  bool operator()(const EdgeInfo &e1, const EdgeInfo &e2) const
+  {
+    return (e1.edgeId < e2.edgeId);
+  }
+};
+
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh)
+{
+  static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
+  static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
+                                       { 1, 1, 0}, { 0, 1, 0},
+                                       { 0, 0, 1}, { 1, 0, 1},
+                                       { 1, 1, 1}, { 0, 1, 1} };
+
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+  const Float_t *buffer = vol.getData();
+  int xydim = dims[0] * dims[1];
+
+  int edgeIdOffsets[12];
+  generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
+
+  Clock::time_point checkpoints[7];
+
+  // part 1: compute caseId of each cell
+  checkpoints[0] = Clock::now();
+
+  int ncells = (dims[0] - 1) * (dims[1] - 1) * (dims[2] - 1);
+  std::vector<CellInfo> cellInfo(ncells);
+
+  ispc::getCellCaseIds(buffer, dims, isoval, &cellInfo[0]);
+
+
+  // part 2: remove empty cells and sort by caseId
+  checkpoints[1] = Clock::now();
+
+  std::vector<CellInfo>::iterator newEnd
+    = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
+  cellInfo.resize(newEnd - cellInfo.begin());
+  std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
+
+  // part 3: generate edges
+  checkpoints[2] = Clock::now();
+
+  ncells = cellInfo.size();
+  std::vector<EdgeInfo> edgeInfo(ncells * 15);
+  for (int i = 0, pos = 0; i < ncells; ++i)
+    {
+    int idx = i * 15;
+
+    const CellInfo &ci = cellInfo[i];
+    int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
+                   3;
+
+    const int *edgeIds = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
+    for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
+      {
+      EdgeInfo &ei = edgeInfo[idx];
+      if (*edgeIds == -1)
+        {
+        ei.edgeId = -1;
+        }
+      else
+        {
+        ei.edgeId = baseEdge + edgeIdOffsets[*edgeIds];
+
+        ei.idx[0] = ci.idx[0];
+        ei.idx[1] = ci.idx[1];
+        ei.idx[2] = ci.idx[2];
+        ei.idx[3] = *edgeIds;
+
+        ei.pos = pos++;
+        }
+      }
+    }
+
+  // part 4: remove invalid edges and sort by unique edgeId
+  checkpoints[3] = Clock::now();
+
+  std::vector<EdgeInfo>::iterator newEnd1
+    = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
+  edgeInfo.resize(newEnd1 - edgeInfo.begin());
+  std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
+
+  // part 5: merge duplicate edges, generate indexes
+  checkpoints[4] = Clock::now();
+
+  std::vector<int> indexes(edgeInfo.size());
+  size_t last = 0;
+  for (size_t i = 0; i < edgeInfo.size(); ++i)
+    {
+    if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
+      {
+      if (++last != i)
+        {
+        edgeInfo[last] = edgeInfo[i];
+        }
+      }
+    indexes[edgeInfo[i].pos] = last;
+    }
+  edgeInfo.resize(last + 1);
+
+  // part 6: compute gradients and generate vertices
+  checkpoints[5] = Clock::now();
+
+  std::vector<Float_t> points, normals;
+  points.reserve(edgeInfo.size() * 3);
+  normals.reserve(edgeInfo.size() * 3);
+
+  for (size_t i = 0;  i < edgeInfo.size(); ++i)
+    {
+    const EdgeInfo &ei = edgeInfo[i];
+
+    int p1idx[3], p2idx[3];
+    int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
+    int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[1];
+    p1idx[0] = ei.idx[0] + idxOffset[p1][0];
+    p1idx[1] = ei.idx[1] + idxOffset[p1][1];
+    p1idx[2] = ei.idx[2] + idxOffset[p1][2];
+    p2idx[0] = ei.idx[0] + idxOffset[p2][0];
+    p2idx[1] = ei.idx[1] + idxOffset[p2][1];
+    p2idx[2] = ei.idx[2] + idxOffset[p2][2];
+
+    int p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
+    int p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
+    Float_t w = (isoval - buffer[p1FlatIdx]) /
+               (buffer[p2FlatIdx] - buffer[p1FlatIdx]);
+
+    Float_t pos1[3], pos2[3], grad1[3], grad2[3];
+    computePosition(p1idx, origin, spacing, pos1);
+    computeGradient(p1idx, buffer, dims, spacing, grad1);
+    computePosition(p2idx, origin, spacing, pos2);
+    computeGradient(p2idx, buffer, dims, spacing, grad2);
+
+    for (int ii = 0; ii < 3; ++ii)
+      {
+      points.push_back(lerp(pos1[ii], pos2[ii], w));
+      normals.push_back(lerp(grad1[ii], grad2[ii], w));
+      }
+    }
+
+  checkpoints[6] = Clock::now();
+
+  mesh->points.swap(points);
+  mesh->normals.swap(normals);
+  mesh->indexes.swap(indexes);
+
+  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
+  std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
+  for (int i = 1; i < 7; ++i)
+    {
+    boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
+    double pc = (100.0 * dur.count())/total.count();
+    std::cout << "Part " << i << " - " << partDesc[i] << ": "
+              << dur.count() << " seconds, " << pc << "%" << std::endl;
+    }
+}
+
+}; //namespace simd_2
 

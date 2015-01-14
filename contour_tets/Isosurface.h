@@ -9,13 +9,13 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
                        TriangleMesh_t *trimesh);
 };
 
-namespace vectorized
+namespace simd
 {
 void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
                        TriangleMesh_t *trimesh);
 };
 
-namespace vectorized_2
+namespace simd_2
 {
 void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
                        TriangleMesh_t *trimesh);

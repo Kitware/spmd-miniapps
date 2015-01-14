@@ -8,8 +8,39 @@
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
 #include <iostream>
+#include <string>
 
 typedef boost::chrono::steady_clock Clock;
+
+static const char * impstr[] = { "scalar", "shortvec", "simd", "scalar_2",
+                                 "simd_2", "scalar_2.1", "simd_2.1" };
+
+enum ImplementationId
+{
+  IMP_SCALAR = 0,
+  IMP_SHORTVEC,
+  IMP_SIMD,
+  IMP_SCALAR_2,
+  IMP_SIMD_2,
+  IMP_SCALAR_2_1,
+  IMP_SIMD_2_1,
+  NUM_IMPLEMENTATIONS
+};
+
+ImplementationId getImplementationId(const char *str)
+{
+  std::string name(str);
+  ImplementationId imp = NUM_IMPLEMENTATIONS;
+  for (int i = 0; i < NUM_IMPLEMENTATIONS; ++i)
+    {
+    if (name == impstr[i])
+      {
+      imp = static_cast<ImplementationId>(i);
+      }
+    }
+
+  return imp;
+}
 
 int main(int argc, char* argv[])
 {
@@ -19,74 +50,58 @@ int main(int argc, char* argv[])
     std::cout << argv[0]
               << " in_image.vtk out_poly.vtk isoval <implementation>"
               << std::endl;
-    std::cout << "Implementations: scalar, mixed, vectorized, scalar_2, "
-              << "scalar_3, mixed_3, scalar_3.1, mixed_3.1" << std::endl;
+    std::cout << "Implementations:";
+    for (int i = 0; i < NUM_IMPLEMENTATIONS; ++i)
+      {
+      std::cout << " " << impstr[i];
+      }
+    std::cout << std::endl;
     return 1;
     }
+
+  ImplementationId choice = getImplementationId(argv[4]);
+  if (choice == NUM_IMPLEMENTATIONS)
+    {
+    std::cout << "Invalid implementation" << std::endl;
+    }
+
 
   Image3D_t volume;
   loadImage3D(argv[1], &volume);
 
-  TriangleMesh_t mesh;
-
-  std::string opt(argv[4]);
-  Clock::time_point start, finish;
-
   Float_t isoval = boost::lexical_cast<Float_t>(argv[3]);
 
-  if (opt == "scalar")
+  TriangleMesh_t mesh;
+
+  Clock::time_point start, finish;
+  start = Clock::now();
+  switch (choice)
     {
-    start = Clock::now();
-    scalar::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
+    case IMP_SCALAR:
+      scalar::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SHORTVEC:
+      shortvec::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SIMD:
+      simd::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SCALAR_2:
+      scalar_2::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SIMD_2:
+      simd_2::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SCALAR_2_1:
+      scalar_2_1::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_SIMD_2_1:
+      simd_2_1::extractIsosurface(volume, isoval, &mesh);
+      break;
+    default:
+      break;
     }
-  else if (opt == "mixed")
-    {
-    start = Clock::now();
-    mixed::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "vectorized")
-    {
-    start = Clock::now();
-    vectorized::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "scalar_2")
-    {
-    start = Clock::now();
-    scalar_2::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "scalar_3")
-    {
-    start = Clock::now();
-    scalar_3::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "mixed_3")
-    {
-    start = Clock::now();
-    mixed_3::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "scalar_3.1")
-    {
-    start = Clock::now();
-    scalar_3_1::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else if (opt == "mixed_3.1")
-    {
-    start = Clock::now();
-    mixed_3_1::extractIsosurface(volume, isoval, &mesh);
-    finish = Clock::now();
-    }
-  else
-    {
-    std::cout << "Invalid option\n";
-    return 1;
-    }
+  finish = Clock::now();
 
   boost::chrono::duration<double> sec = finish - start;
 

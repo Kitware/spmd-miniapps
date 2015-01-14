@@ -1,8 +1,6 @@
 #include "type.h"
 
 static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-static const int edgeVerts[12][2] = {{0,1}, {1,2}, {3,2}, {0,3}, {4,5}, {5,6},
-                                     {7,6}, {4,7}, {0,4}, {1,5}, {3,7}, {2,6}};
 
 
 export uniform int getCellCases(uniform const Float_t buffer[],
@@ -126,6 +124,7 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
                                    uniform const Float_t spacing[3],
                                    uniform Float_t isoval,
                                    uniform const int triangleCases[],
+                                   uniform const int edgeVerts[],
                                    uniform int numberOfCells,
                                    uniform const int cellIndex[],
                                    uniform const int caseIds[],
@@ -134,6 +133,9 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
                                    uniform Float_t normals[])
 {
   uniform int ptxyCount = dims[0] * dims[1];
+  uniform const int idxOff[8] = { 0, 1, dims[0] + 1, dims[0], ptxyCount,
+                                  1 + ptxyCount, 1 + dims[0] + ptxyCount,
+                                  dims[0] + ptxyCount };
 
   uniform int ncells[3] = { dims[0] - 1, dims[1] - 1, dims[2] - 1 };
   uniform int cellxyCount = ncells[0] * ncells[1];
@@ -148,16 +150,7 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
 
     int ptIdx = zc * ptxyCount + yc * dims[0] + xc;
 
-    Float_t val[8], pos[8][3], grad[8][3];
-
-    val[0] = buffer[ptIdx];
-    val[1] = buffer[ptIdx + 1];
-    val[2] = buffer[ptIdx + 1 + dims[0]];
-    val[3] = buffer[ptIdx + dims[0]];
-    val[4] = buffer[ptIdx + ptxyCount];
-    val[5] = buffer[ptIdx + 1 + ptxyCount];
-    val[6] = buffer[ptIdx + 1 + dims[0] + ptxyCount];
-    val[7] = buffer[ptIdx + dims[0] + ptxyCount];
+    Float_t pos[8][3], grad[8][3];
 
     pos[0][0] = origin[0] + (((Float_t)xc) * spacing[0]);
     pos[0][1] = origin[1] + (((Float_t)yc) * spacing[1]);
@@ -204,8 +197,10 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
     int vidx = vertIndex[i];
     for (; *edges != -1; ++edges, vidx += 3)
       {
-      int v1 = edgeVerts[*edges][0], v2 = edgeVerts[*edges][1];
-      Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
+      int v1 = edgeVerts[*edges * 2 + 0], v2 = edgeVerts[*edges * 2 + 1];
+      Float_t val1 = buffer[ptIdx + idxOff[v1]];
+      Float_t val2 = buffer[ptIdx + idxOff[v2]];
+      Float_t w = (isoval - val1)/(val2 - val1);
 
       for (int ii = 0; ii < 3; ++ii)
         {

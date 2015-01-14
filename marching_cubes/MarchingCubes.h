@@ -8,12 +8,12 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
-namespace mixed {
+namespace shortvec {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
-namespace vectorized {
+namespace simd {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
@@ -23,22 +23,17 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
-namespace scalar_3 {
+namespace simd_2 {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
-namespace mixed_3 {
+namespace scalar_2_1 {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
-namespace scalar_3_1 {
-void extractIsosurface(const Image3D_t &vol, Float_t isoval,
-                       TriangleMesh_t *mesh);
-};
-
-namespace mixed_3_1 {
+namespace simd_2_1 {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };

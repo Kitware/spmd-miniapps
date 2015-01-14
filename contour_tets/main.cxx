@@ -12,15 +12,30 @@
 
 typedef boost::chrono::steady_clock Clock;
 
-static const char* impstr[] = { "scalar", "vectorized", "vectorized_v2" };
+static const char* impstr[] = { "scalar", "simd", "simd_2" };
 
-enum Implementations
+enum ImplementationId
 {
   IMP_SCALAR = 0,
-  IMP_VECTORIZED,
-  IMP_VECTORIZED_2,
+  IMP_SIMD,
+  IMP_SIMD_2,
   NUM_IMPLEMENTATIONS
 };
+
+ImplementationId getImplementationId(const char *str)
+{
+  std::string name(str);
+  ImplementationId imp = NUM_IMPLEMENTATIONS;
+  for (int i = 0; i < NUM_IMPLEMENTATIONS; ++i)
+    {
+    if (name == impstr[i])
+      {
+      imp = static_cast<ImplementationId>(i);
+      }
+    }
+
+  return imp;
+}
 
 int main(int argc, char* argv[])
 {
@@ -39,20 +54,13 @@ int main(int argc, char* argv[])
     return 1;
     }
 
-  std::string opt(argv[4]);
-  Implementations imp = NUM_IMPLEMENTATIONS;
-  for (int i = 0; i < NUM_IMPLEMENTATIONS; ++i)
-    {
-    if (opt == impstr[i])
-      {
-      imp = static_cast<Implementations>(i);
-      }
-    }
-  if (imp == NUM_IMPLEMENTATIONS)
+  ImplementationId choice = getImplementationId(argv[4]);
+  if (choice == NUM_IMPLEMENTATIONS)
     {
     std::cout << "Invalid implementation" << std::endl;
     return 1;
     }
+
 
   TetrahedronMesh_t tetmesh;
   loadTetrahedronMesh(argv[1], &tetmesh);
@@ -63,16 +71,16 @@ int main(int argc, char* argv[])
 
   Clock::time_point start, finish;
   start = Clock::now();
-  switch (imp)
+  switch (choice)
     {
     case IMP_SCALAR:
       scalar::extractIsosurface(tetmesh, isoval, &trimesh);
       break;
-    case IMP_VECTORIZED:
-      vectorized::extractIsosurface(tetmesh, isoval, &trimesh);
+    case IMP_SIMD:
+      simd::extractIsosurface(tetmesh, isoval, &trimesh);
       break;
-    case IMP_VECTORIZED_2:
-      vectorized_2::extractIsosurface(tetmesh, isoval, &trimesh);
+    case IMP_SIMD_2:
+      simd_2::extractIsosurface(tetmesh, isoval, &trimesh);
       break;
     default:
       break;
