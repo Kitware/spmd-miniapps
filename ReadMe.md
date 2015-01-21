@@ -25,7 +25,7 @@ Each algorithm has a basic straight-forward scalar implementation and some
 scalar and vectorized implementations, which try some variation in data
 structures and data layouts.
 
-## 2D Poisson Solver
+### 2D Poisson Solver
 This is an easy to vectorize algorithm. It was implemented to compare it
 against the more complex algorithms (Marching Cubes and Marching Tetrahedra).
 The application takes a grayscale pgm image as input, computes the divergence
