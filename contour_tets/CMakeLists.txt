@@ -9,6 +9,10 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
+  set (MIC_BUILD ON)
+endif()
+
 set (EXTRA_COMPILER_FLAGS
   "-Wall -Wextra -Wstrict-aliasing -Wno-unused"
   CACHE STRING ""
@@ -27,7 +31,7 @@ set (ISPC_SOURCE_FILES
 
 if (MIC_BUILD)
   set (TET_MESH_CONT_ISPC_GANG_SIZE "16" CACHE STRING "")
-  set (ISPC_INTRINSICS_HEADER "knc-i1x${TET_MESH_CONT_ISPC_GANG_SIZE}")
+  set (ISPC_INTRINSICS_HEADER "knc-i1x${TET_MESH_CONT_ISPC_GANG_SIZE}.h")
 
   ispc_generate_cxx (ISPC_SRCS
     ${TET_MESH_CONT_ISPC_GANG_SIZE}

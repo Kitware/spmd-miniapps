@@ -4,7 +4,7 @@ cmake_policy (POP)
 
 message (STATUS "Looking for ISPC...")
 find_program (ISPC_COMMAND ispc)
-get_filename_component (ISPC_ROOT ${ISPC_COMMAND} DIRECTORY CACHE)
+get_filename_component (ISPC_ROOT ${ISPC_COMMAND} PATH CACHE)
 
 include (FindPackageHandleStandardArgs)
 find_package_handle_standard_args (ISPC DEFAULT_MSG ISPC_COMMAND ISPC_ROOT)
@@ -55,7 +55,7 @@ endfunction()
 function (ispc_generate_cxx SOURCES GANG_SIZE INTRINSICS_HEADER OPTIONS)
   separate_arguments (OPTIONS)
 
-  set (TARGET "generic-${GANG_SIZE}")
+  set (TARGET "generic-x${GANG_SIZE}")
 
   foreach (filename ${ARGN})
     get_filename_component (base ${filename} NAME)

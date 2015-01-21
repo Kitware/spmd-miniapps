@@ -1,5 +1,5 @@
-#ifndef __ppm_h
-#define __ppm_h
+#ifndef __pgm_h
+#define __pgm_h
 
 #include "Image2D.h"
 
@@ -8,20 +8,20 @@
 #include <string>
 
 template <typename PType>
-void load_ppm(const char *fname, Image2D<PType> *img)
+void load_pgm(const char *fname, Image2D<PType> *img)
 {
-  std::ifstream ppm;
-  ppm.open(fname);
+  std::ifstream pgm;
+  pgm.open(fname);
 
   std::string magic;
   int xdim, ydim, maxColor;
 
-  ppm >> magic >> xdim >> ydim >> maxColor >> std::ws;
+  pgm >> magic >> xdim >> ydim >> maxColor >> std::ws;
 
   int npixels = xdim * ydim;
   char *readBuffer = new char[npixels];
-  ppm.read(readBuffer, npixels);
-  ppm.close();
+  pgm.read(readBuffer, npixels);
+  pgm.close();
 
   img->allocate(xdim, ydim);
   PType *buffer = img->getBuffer();
@@ -37,7 +37,7 @@ void load_ppm(const char *fname, Image2D<PType> *img)
 }
 
 template <typename PType>
-void write_ppm(const char *fname, const Image2D<PType> &img)
+void write_pgm(const char *fname, const Image2D<PType> &img)
 {
   int npixels = img.getXDim() * img.getYDim();
   char *writeBuffer = new char[npixels];
@@ -51,12 +51,12 @@ void write_ppm(const char *fname, const Image2D<PType> &img)
       }
     }
 
-  std::ofstream ppm;
-  ppm.open(fname);
+  std::ofstream pgm;
+  pgm.open(fname);
 
-  ppm << "P5\n" << img.getXDim() << " " << img.getYDim() << "\n255\n";
-  ppm.write(writeBuffer, npixels);
-  ppm.close();
+  pgm << "P5\n" << img.getXDim() << " " << img.getYDim() << "\n255\n";
+  pgm.write(writeBuffer, npixels);
+  pgm.close();
 
   delete [] writeBuffer;
 }

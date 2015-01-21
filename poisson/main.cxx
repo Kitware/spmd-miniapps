@@ -2,7 +2,7 @@
 #include "type.h"
 
 #include <Image2D.h>
-#include <ppm.h>
+#include <pgm.h>
 
 #include <boost/chrono.hpp>
 
@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
   if (argc != 4)
     {
     std::cout << "usage:\n"
-              << argv[0] << "in.ppm out.ppm <implementations>\n"
+              << argv[0] << "in.pgm out.pgm <implementations>\n"
               << "Implementations: serial, simd\n";
     return 1;
     }
@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     }
 
   Image2D<Float_t> image;
-  load_ppm(argv[1], &image);
+  load_pgm(argv[1], &image);
 
   int xdim = image.getXDim();
   int ydim = image.getYDim();
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
   boost::chrono::duration<double> sec = finish - start;
   std::cout << "done in " << sec.count() << " seconds\n";
 
-  write_ppm(argv[2], solImg);
+  write_pgm(argv[2], solImg);
 
   return 0;
 }

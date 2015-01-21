@@ -9,6 +9,10 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
+  set (MIC_BUILD ON)
+endif()
+
 set (EXTRA_COMPILER_FLAGS
   "-Wall -Wextra -Wstrict-aliasing -Wno-unused"
   CACHE STRING ""
@@ -28,16 +32,23 @@ set (ISPC_SOURCE_FILES
 )
 
 if (MIC_BUILD)
+  set (MARCHING_CUBES_ISPC_GANG_SIZE "16" CACHE STRING "")
   ispc_generate_cxx (ISPC_SRCS
-    "16"
-    "knc-i1x16.h"
+    ${MARCHING_CUBES_ISPC_GANG_SIZE}
+    "knc-i1x${MARCHING_CUBES_ISPC_GANG_SIZE}.h"
     "-I${CMAKE_CURRENT_BINARY_DIR}"
     ${ISPC_SOURCE_FILES}
   )
   include_directories("${ISPC_ROOT}/examples/intrinsics")
 else ()
+  set (MARCHING_CUBES_ISPC_GANG_SIZE "16" CACHE STRING "")
+  set (MARCHING_CUBES_ISPC_ISA "avx2" CACHE STRING "")
+  set (ISPC_TARGET
+    "${MARCHING_CUBES_ISPC_ISA}-i32x${MARCHING_CUBES_ISPC_GANG_SIZE}"
+  )
+
   ispc_compile (ISPC_OBJS ISPC_SRCS
-    "--target=avx2-i32x8 -I${CMAKE_CURRENT_BINARY_DIR}"
+    "--target=${ISPC_TARGET} -I${CMAKE_CURRENT_BINARY_DIR}"
     ${ISPC_SOURCE_FILES}
   )
 endif (MIC_BUILD)
