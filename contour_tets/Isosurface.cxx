@@ -247,6 +247,8 @@ struct TetInfoB
   Float_t val[4];
 };
 
+#define USE_VECTORIZED_NORMALIZE 1
+
 using ispc::TetInfo_soa;
 
 void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
@@ -360,7 +362,7 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
       int sidx = ((t/GANG_SIZE) * GANG_SIZE * 3) + (t % GANG_SIZE);
       for (int ii = 0; ii < 3; ++ii)
         {
-#if 1
+#if USE_VECTORIZED_NORMALIZE
         triPtNorms[didx + (ii * GANG_SIZE)] +=
           triCellNorms[sidx + (ii * GANG_SIZE)];
 #else
@@ -372,7 +374,7 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     }
   triPoints.resize(numPts * 3);
 
-#if 1
+#if USE_VECTORIZED_NORMALIZE
   ispc::normalizeNormals(&triPtNorms[0], numPts);
   triPtNorms.resize(numPts * 3);
 #else
