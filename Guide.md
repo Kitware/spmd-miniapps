@@ -183,6 +183,7 @@ these tetrahedra in AOSOA format:
 * the indexes of the four vertices
 * the scalar values at the four vertices
 * the position of the four vertices
+
 This array is processed by a vectorized function that computes the triangles
 of the isosurface. A scalar code then goes through the list of triangles and
 merges duplicate vertices and also generates the index array. Finally, a
@@ -202,6 +203,7 @@ We have run some tests to profile the performance of each implementation.
 Following are the machine the tests were run on:
 * Core i7 4900MQ @ 2.8 GHz
 * Xeon Phi SE10P (KNC)
+
 Following are the datasets* the tests were run on:
 * Volume datasets:
   * PlasticSkull: 256x256x160 scalars
@@ -209,103 +211,110 @@ Following are the datasets* the tests were run on:
 * Tetrahedra Mesh datasets:
   * PlasticSkull: Num Points = 10,485,760  Num Tets = 51,694,875
   * VisibleHuman: Num Points = 16,842,752  Num Tets = 83,232,000
+
 Tests were run using both float and double scalar values. On the Core i7 CPU,
 tests were run with avx2 ISA and gang sizes 8 and 16. On Xeon Phi, a gang size
 of 16 only was tested. Following are the results (all times are in seconds):
 
 ## Marching Cubes
 ### CPU: Core i7, Precision: float, Gang size: 8
-
+```
 |            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.335 |0.376 |0.89   |0.383 |0.873  |0.305   |0.259 |1.179  |0.240     |0.193 |1.242  |
 |VisibleHuman|8.669 |9.730 |0.893  |12.177|0.714  |2.936   |2.307 |1.272  |2.651     |2.050 |1.293  |
-
+```
 ### CPU: Core i7, Precision: float, Gang size: 16
-
+```
 |            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.332 |0.399 |0.833  |0.394 |0.844  |0.306   |0.259 |1.179  |0.249     |0.199 |1.254  |
 |VisibleHuman|8.684 |9.901 |0.877  |12.309|0.705  |2.940   |2.310 |1.273  |2.647     |2.017 |1.312  |
-
+```
 ### CPU: Core i7, Precision: double, Gang size: 8
-
+```
 |            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.353 |0.411 |0.860  |0.474 |0.745  |0.310   |0.303 |1.023  |0.247     |0.245 |1.011  |
 |VisibleHuman|9.058 |10.180|0.890  |13.043|0.695  |2.950   |2.868 |1.028  |2.712     |2.573 |1.054  |
-
+```
 ### CPU: Core i7, Precision: double, Gang size: 16
-
+```
 |            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.355 |0.469 |0.758  |0.493 |0.720  |0.308   |0.303 |1.018  |0.248     |0.238 |1.040  |
 |VisibleHuman|9.046 |10.403|0.870  |13.275|0.681  |2.950   |2.884 |1.023  |2.660     |2.603 |1.022  |
-
+```
 ### CPU: Xeon Phi, Precision: float, Gang size: 16
-
+```
 |            |scalar |   shortvec    |     simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |       | time  |speedup| time  |speedup|        | time |speedup|          | time |speedup|
 |------------|-------|-------|-------|-------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|4.681  |4.171  |1.122  |4.853  |0.965  |3.529   |3.504 |1.007  |3.460     |3.356 |1.031  |
 |VisibleHuman|142.434|139.630|1.020  |308.793|0.461  |33.797  |33.402|1.012  |33.632    |32.436|1.037  |
-
+```
 ### CPU: Xeon Phi, Precision: double, Gang size: 16
-
+```
 |            |scalar |   shortvec    |     simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
 |            |       | time  |speedup| time  |speedup|        | time |speedup|          | time |speedup|
 |------------|-------|-------|-------|-------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|5.040  |4.824  |1.045  |5.812  |0.867  |3.604   |3.764 |0.957  |3.546     |3.622 |0.979  |
 |VisibleHuman|153.055|151.935|1.007  |369.645|0.414  |34.393  |36.163|0.951  |34.413    |35.490|0.970  |
-
+```
 
 ## Marching Tetrahedra
 ### CPU: Core i7, Precision: float, Gang size: 8
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|0.774  |1.101  |0.704  |0.951  |0.815  |
 |VisibleHuman|1.380  |2.168  |0.636  |1.697  |0.813  |
-
+```
 ### CPU: Core i7, Precision: float, Gang size: 16
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|0.762  |1.152  |0.662  |0.960  |0.794  |
 |VisibleHuman|1.372  |2.908  |0.654  |1.721  |0.798  |
-
+```
 ### CPU: Core i7, Precision: double, Gang size: 8
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|0.749  |1.148  |0.652  |0.936  |0.800  |
 |VisibleHuman|1.365  |2.207  |0.618  |1.690  |0.807  |
-
+```
 ### CPU: Core i7, Precision: double, Gang size: 16
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|0.765  |1.210  |0.632  |1.008  |0.758  |
 |VisibleHuman|1.357  |2.246  |0.604  |1.800  |0.754  |
-
+```
 ### CPU: Xeon Phi, Precision: float, Gang size: 16
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|13.243 |14.434 |0.917  |6.880  |1.925  |
 |VisibleHuman|22.729 |26.691 |0.852  |12.481 |1.821  |
-
+```
 ### CPU: Xeon Phi, Precision: double, Gang size: 16
+```
 |            |scalar |      simd     |    simd 2     |
 |            |       | time  |speedup| time  |speedup|
 |------------|-------|-------|-------|-------|-------|
 |PlasticSkull|13.682 |15.843 |0.864  |8.115  |1.686  |
 |VisibleHuman|23.512 |29.229 |0.804  |14.620 |1.608  |
-
+```
 From the results it can be seen that, though these methods are trivially
 parallelizable (eg. using multi-threading), vectorization does not produce
 good results and often hurts the performance. This is probably due to low
