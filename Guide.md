@@ -84,7 +84,7 @@ We have two main versions of this method, each with two implementations - a
 scalar implementation using regular C++ and a vectorized implementation
 using ispc.
 
-The first version is a straight-forward implementation of the above
+The first version (scalar) is a straight-forward implementation of the above
 description.
 We perform an iteration over each cell. For each cell the index into
 the triangles configurations look-up table is computed.
@@ -93,18 +93,20 @@ computed. Then for each edge where a vertex lies, the position and gradients
 are interpolated.
 For identifying duplicates, a Point Locator data structure is used which
 divides the data range into bins to reduce the number of comparisons.
-The vectorized version functions slightly differently.
+The vectorized version (simd) functions slightly differently.
 An initial pass is performed to find the look-up index of each cell.
 Based on the indexes, the arrays for points, normals and indexes are
 preallocated. A second pass is performed to generate the triangles.
 Finally the points array is checked to remove duplicates using the
 Point Locator data structure. This step is not vectorized.
-Another simple vectorized implementation tests if, instead of vectorizing the
+Another simple vectorized implementation (shortvec) tests if,
+instead of vectorizing the
 whole algorithm, only vectorizing some short-vector based parts
 (gradient computation and linear interpolation in this case), would give some
 reasonable performance improvements.
 
-The second version was implemented from scratch specifically to be easy to
+The second version (scalar_2 and simd_2) was implemented from
+scratch specifically to be easy to
 vectorize. The algorithm is divided in to stages, where some intermediate
 stages just reformat the data from previous stage, to be easy to process in the
 next vector stage.
@@ -134,7 +136,8 @@ most of the time was spent in the first stage. The other stages were taking
 insignificant time and were not worth vectorizing. Therefore the vector
 implementation of this version only vectorizes the first stage of this version.
 
-We implemented another, slightly modified, second version. The idea was that
+We implemented another, slightly modified, second version (scalar_2.1 and
+simd_2.1). The idea was that
 since the later stages were not worth vectorizing, they should be combined into
 a single, efficient scalar implementation. We combine stages three and four
 into a single scalar stage, which avoids some overhead of sorting and other
@@ -169,13 +172,14 @@ generated, its surface normal is computed and added to the normals
 of each vertex of the triangle. Finally the normals are normalized.
 
 We have implemented one scalar and two vectorized versions of this method.
-The scalar version is a straight forward implementation of the above
+The scalar version (scalar) is a straight forward implementation of the above
 description.
 
 Because of the unstructured nature of the input data, there are a lot of
 indirections and gather/scatter involved with this method.
-The first vectorized version pre-processes the input data to lay it out in
-a AOSOA format with the hope that the overhead would be worth it.
+The first vectorized version (simd) pre-processes
+the input data to lay it out in
+an AOSOA format with the hope that the overhead would be worth it.
 First, the lookup index for each tetrahedron is computed. Empty tetrahedra
 are discarded and the remaining are sorted by their lookup index.
 A data structure is generated which stores the following information about
@@ -191,7 +195,8 @@ of the isosurface. A scalar code then goes through the list of triangles and
 merges duplicate vertices and also generates the index array. Finally, a
 vectorized function normalizes all the vertex normals.
 
-The second vectorized version is a direct port of the scalar version code
+The second vectorized version (simd_2) is a direct port
+of the scalar version's C++ code
 to ispc, followed by vectorization of different portions as much as possible,
 without changing the actual flow. The rationale behind this version was
 to see how much better or worse a direct port would perform. Ideally the
@@ -221,7 +226,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ## Marching Cubes
 ### CPU: Core i7, Precision: float, Gang size: 8
 ```
-|            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar|   shortvec   |    simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.335 |0.376 |0.89   |0.383 |0.873  |0.305   |0.259 |1.179  |0.240     |0.193 |1.242  |
@@ -229,7 +234,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ```
 ### CPU: Core i7, Precision: float, Gang size: 16
 ```
-|            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar|   shortvec   |    simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.332 |0.399 |0.833  |0.394 |0.844  |0.306   |0.259 |1.179  |0.249     |0.199 |1.254  |
@@ -237,7 +242,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ```
 ### CPU: Core i7, Precision: double, Gang size: 8
 ```
-|            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar|   shortvec   |    simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.353 |0.411 |0.860  |0.474 |0.745  |0.310   |0.303 |1.023  |0.247     |0.245 |1.011  |
@@ -245,7 +250,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ```
 ### CPU: Core i7, Precision: double, Gang size: 16
 ```
-|            |scalar|   shortvec   |    simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar|   shortvec   |    simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |      | time |speedup| time |speedup|        | time |speedup|          | time |speedup|
 |------------|------|------|-------|------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|0.355 |0.469 |0.758  |0.493 |0.720  |0.308   |0.303 |1.018  |0.248     |0.238 |1.040  |
@@ -253,7 +258,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ```
 ### CPU: Xeon Phi, Precision: float, Gang size: 16
 ```
-|            |scalar |   shortvec    |     simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar |   shortvec    |     simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |       | time  |speedup| time  |speedup|        | time |speedup|          | time |speedup|
 |------------|-------|-------|-------|-------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|4.681  |4.171  |1.122  |4.853  |0.965  |3.529   |3.504 |1.007  |3.460     |3.356 |1.031  |
@@ -261,7 +266,7 @@ of 16 only was tested. Following are the results (all times are in seconds):
 ```
 ### CPU: Xeon Phi, Precision: double, Gang size: 16
 ```
-|            |scalar |   shortvec    |     simd      |scalar 2|    simd2     |scalar 2.1|   simd 2.1   |
+|            |scalar |   shortvec    |     simd      |scalar 2|    simd 2    |scalar 2.1|   simd 2.1   |
 |            |       | time  |speedup| time  |speedup|        | time |speedup|          | time |speedup|
 |------------|-------|-------|-------|-------|-------|--------|------|-------|----------|------|-------|
 |PlasticSkull|5.040  |4.824  |1.045  |5.812  |0.867  |3.604   |3.764 |0.957  |3.546     |3.622 |0.979  |
