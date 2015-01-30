@@ -11,9 +11,11 @@ ccmake <miniapps_src_dir>
 
 To configure for cross compiling for Xeon Phi (MIC) run the following instead:
 
+```
 ccmake \
   -DCMAKE_TOOLCHAIN_FILE=<miniapps_src_dir>/cmake/stampede-mic-toolchain.cmake \
   <mini_apps_src_dir>
+```
 
 This tool-chain file is known to work on stampede.tacc.utexas.edu. It might
 require some modifications on other systems.
