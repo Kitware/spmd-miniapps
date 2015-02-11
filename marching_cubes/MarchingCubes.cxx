@@ -7,16 +7,23 @@
 
 #include <iostream>
 
-struct Position
+class GetPointPosition
 {
-  Float_t xyz[3];
-  int idx;
-
-  const Float_t* getPosition() const
+public:
+  GetPointPosition(const std::vector<Float_t> &points) : points(points)
   {
-    return xyz;
   }
+
+  const Float_t* operator()(int idx) const
+  {
+    return &points[idx * 3];
+  }
+
+private:
+  const std::vector<Float_t> &points;
 };
+
+typedef PointLocator3D<Float_t, int, GetPointPosition> PointLocator_t;
 
 
 namespace scalar {
@@ -113,7 +120,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     range[(i * 2) + 1] = origin[i] +
                          (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
     }
-  PointLocator3D<Float_t, Position> pointLocator(range, 32, 32, 16);
+  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  GetPointPosition getPosition(mesh->points);
 
   int ptIdx = 0;
 
@@ -214,33 +222,28 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
             Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
 
             // interpolate vertex position
-            Position pt;
-            pt.xyz[0] = lerp(pos[v1][0], pos[v2][0], w);
-            pt.xyz[1] = lerp(pos[v1][1], pos[v2][1], w);
-            pt.xyz[2] = lerp(pos[v1][2], pos[v2][2], w);
-            pt.idx = ptIdx;
+            mesh->points.push_back(lerp(pos[v1][0], pos[v2][0], w));
+            mesh->points.push_back(lerp(pos[v1][1], pos[v2][1], w));
+            mesh->points.push_back(lerp(pos[v1][2], pos[v2][2], w));
 
             bool exists = false;
-            Position *pt_ = pointLocator.insert(pt, &exists);
+            int eid = *pointLocator.insert(ptIdx, &exists, getPosition);
             if (!exists)
               {
               Float_t norm[3];
 
               // interpolate vertex normal
-              norm[0] = lerp(grad[v1][0], grad[v2][0], w);
-              norm[1] = lerp(grad[v1][1], grad[v2][1], w);
-              norm[2] = lerp(grad[v1][2], grad[v2][2], w);
+              mesh->normals.push_back(lerp(grad[v1][0], grad[v2][0], w));
+              mesh->normals.push_back(lerp(grad[v1][1], grad[v2][1], w));
+              mesh->normals.push_back(lerp(grad[v1][2], grad[v2][2], w));
 
-              for (int ii = 0; ii < 3; ++ii)
-                {
-                mesh->points.push_back(pt.xyz[ii]);
-                mesh->normals.push_back(norm[ii]);
-                }
               tri[i] = ptIdx++;
               }
             else
               {
-              tri[i] = pt_->idx;
+              // duplicate, remove it
+              mesh->points.resize(mesh->points.size() - 3);
+              tri[i] = eid;
               }
             }
 
@@ -284,7 +287,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     range[(i * 2) + 1] = origin[i] +
                          (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
     }
-  PointLocator3D<Float_t, Position> pointLocator(range, 32, 32, 16);
+  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  GetPointPosition getPosition(mesh->points);
 
   int ptIdx = 0;
 
@@ -379,41 +383,46 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
             Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
 
             // interpolate vertex position
-            Position pt;
-            ispc::lerp(3, pos[v1], pos[v2], w, pt.xyz);
-            pt.idx = ptIdx;
+            Float_t ptpos[3];
+            ispc::lerp(3, pos[v1], pos[v2], w, ptpos);
+
+            // temporarily add the point
+            mesh->points.push_back(ptpos[0]);
+            mesh->points.push_back(ptpos[1]);
+            mesh->points.push_back(ptpos[2]);
 
             bool exists = false;
-            Position *pt_ = pointLocator.insert(pt, &exists);
+            int eid = *pointLocator.insert(ptIdx, &exists, getPosition);
             if (!exists)
               {
-              Float_t norm[3];
-
               // interpolate vertex normal
+              Float_t norm[3];
               ispc::lerp(3, grad[v1], grad[v2], w, norm);
-              for (int ii = 0; ii < 3; ++ii)
-                {
-                mesh->points.push_back(pt.xyz[ii]);
-                mesh->normals.push_back(norm[ii]);
-                }
+
+              mesh->normals.push_back(norm[0]);
+              mesh->normals.push_back(norm[1]);
+              mesh->normals.push_back(norm[2]);
+
               tri[i] = ptIdx++;
               }
             else
               {
-              tri[i] = pt_->idx;
+              // remove the point
+              mesh->points.resize(mesh->points.size() - 3);
+              tri[i] = eid;
               }
             }
 
-            if (tri[0] == tri[1] || tri[1] == tri[2] || tri[2] == tri[0])
-              {
-                //std::cout << "degenerate triangle" << std::endl;
-              }
-            else
-              {
-                mesh->indexes.push_back(tri[0]);
-                mesh->indexes.push_back(tri[1]);
-                mesh->indexes.push_back(tri[2]);
-              }
+          if (tri[0] == tri[1] || tri[1] == tri[2] || tri[2] == tri[0])
+            {
+            //std::cout << "degenerate triangle" << std::endl;
+            }
+          else
+            {
+            mesh->indexes.push_back(tri[0]);
+            mesh->indexes.push_back(tri[1]);
+            mesh->indexes.push_back(tri[2]);
+            }
           }
         }
       }
@@ -427,21 +436,6 @@ namespace simd {
 struct VertexId
 {
   int idx, id;
-};
-
-class GetPosition
-{
-public:
-  GetPosition(const std::vector<Float_t> &points)
-    : points(points) {}
-
-  const Float_t* operator()(const VertexId &v) const
-  {
-    return &points[v.idx * 3];
-  }
-
-private:
-  const std::vector<Float_t> &points;
 };
 
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
@@ -487,9 +481,8 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     range[(i * 2) + 1] = origin[i] +
                          (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
     }
-  PointLocator3D<Float_t, VertexId, GetPosition>
-    pointLocator(range, 32, 32, 16);
-  GetPosition getPosition(points);
+  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  GetPointPosition getPosition(mesh->points);
 
   mesh->indexes.reserve(nverts);
   int tri[3];
@@ -497,31 +490,36 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     {
     bool exists = false;
 
-    VertexId put;
-    put.idx = i;
-    put.id = ptid;
+    // temporarily add the point
+    mesh->points.push_back(points[(i * 3) + 0]);
+    mesh->points.push_back(points[(i * 3) + 1]);
+    mesh->points.push_back(points[(i * 3) + 2]);
 
-    VertexId *get = pointLocator.insert(put, &exists, getPosition);
+    int eid = *pointLocator.insert(ptid, &exists, getPosition);
     if (!exists)
       {
-      for (int ii = 0; ii < 3; ++ii)
-        {
-        mesh->points.push_back(points[(i * 3) + ii]);
-        mesh->normals.push_back(normals[(i * 3) + ii]);
-        ++ptid;
-        }
+      mesh->normals.push_back(normals[(i * 3) + 0]);
+      mesh->normals.push_back(normals[(i * 3) + 1]);
+      mesh->normals.push_back(normals[(i * 3) + 2]);
+      ++ptid;
       }
-    tri[j] = get->id;
+    else
+      {
+      // remove the point
+      mesh->points.resize(mesh->points.size() - 3);
+      }
+    tri[j] = eid;
 
     if (j == 2)
       {
-        if (tri[0] != tri[1] && tri[1] != tri[2] && tri[2] != tri[0])
-          {
-          mesh->indexes.push_back(tri[0]);
-          mesh->indexes.push_back(tri[1]);
-          mesh->indexes.push_back(tri[2]);
-          }
-        j = -1;
+      // remove degenerate triangles
+      if (tri[0] != tri[1] && tri[1] != tri[2] && tri[2] != tri[0])
+        {
+        mesh->indexes.push_back(tri[0]);
+        mesh->indexes.push_back(tri[1]);
+        mesh->indexes.push_back(tri[2]);
+        }
+      j = -1;
       }
     }
 }

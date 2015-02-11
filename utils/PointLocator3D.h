@@ -6,6 +6,8 @@
 #include <iostream>
 #include <vector>
 
+namespace pl_internal
+{
 template<typename T, typename PointHandle>
 class GetPointPosition
 {
@@ -15,9 +17,10 @@ public:
     return p.getPosition();
   }
 };
+}
 
-template <typename T, typename PointHandle,
-          typename GetPointPositionType = GetPointPosition<T, PointHandle> >
+template <typename T, typename PointHandle, typename GetPointPositionType =
+  pl_internal::GetPointPosition<T, PointHandle> >
 class PointLocator3D
 {
 public:
@@ -41,18 +44,22 @@ private:
 template <typename T, typename PointHandle, typename GetPointPositionType>
 inline PointLocator3D<T, PointHandle, GetPointPositionType>::
 PointLocator3D(T range[6], int xdivs, int ydivs, int zdivs)
-  : xdivs(xdivs), ydivs(ydivs), zdivs(zdivs), xydivs(xdivs * ydivs),
-    npoints(0)
+  : npoints(0)
 {
+  this->xdivs = std::max(1, xdivs);
+  this->ydivs = std::max(1, ydivs);
+  this->zdivs = std::max(1, zdivs);
+  this->xydivs = this->xdivs * this->ydivs;
+
   std::copy(range, range + 6, this->range);
 
-  int nbins = xydivs * zdivs;
+  int nbins = this->xydivs * this->zdivs;
   this->bins.resize(nbins);
 }
 
 template <typename T, typename PointHandle, typename GetPointPositionType>
 PointHandle* PointLocator3D<T, PointHandle, GetPointPositionType>::
-insert(const PointHandle &point, bool *exists, 
+insert(const PointHandle &point, bool *exists,
        GetPointPositionType getPosition)
 {
   const T *pval = getPosition(point);
