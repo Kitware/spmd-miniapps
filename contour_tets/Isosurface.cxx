@@ -218,7 +218,7 @@ const int GANG_SIZE = ISPC_GANG_SIZE;
 
 inline size_t getSOASize(size_t aos_size, size_t gangSize)
 {
-  return (aos_size + (aos_size % gangSize));
+  return (aos_size + gangSize - (aos_size % gangSize));
 }
 
 inline size_t getNumberOfGangs(size_t aos_size, size_t gangSize)
