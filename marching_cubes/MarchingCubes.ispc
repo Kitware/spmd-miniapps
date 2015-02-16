@@ -5,17 +5,18 @@ static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
 export uniform int getCellCases(uniform const Float_t buffer[],
                                 uniform const int dims[3],
+                                uniform const int cellExtent[6],
+                                uniform const int ncells[3],
                                 uniform Float_t isoval, uniform int cellCase[])
 {
   uniform int ptxyCount = dims[0] * dims[1];
-
-  uniform int ncells[3] = { dims[0] - 1, dims[1] - 1, dims[2] - 1 };
   uniform int cellxyCount = ncells[0] * ncells[1];
 
   int numberOfActiveCells = 0;
-  foreach (zc = 0 ... ncells[2], yc = 0 ... ncells[1], xc = 0 ... ncells[0])
+  foreach (zc = cellExtent[4] ... cellExtent[5] + 1,
+           yc = cellExtent[2] ... cellExtent[3] + 1,
+           xc = cellExtent[0] ... cellExtent[1] + 1)
     {
-    int cellIdx = zc * cellxyCount + yc * ncells[0] + xc;
     int ptIdx = zc * ptxyCount + yc * dims[0] + xc;
 
     Float_t val[8];
@@ -34,6 +35,8 @@ export uniform int getCellCases(uniform const Float_t buffer[],
       caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
       }
 
+    int cellIdx = ((zc - cellExtent[4]) * cellxyCount) +
+                  ((yc - cellExtent[2]) * ncells[0]) + (xc - cellExtent[0]);
     cellCase[cellIdx] = caseId;
 
     if (caseId != 0 && caseId != 255)

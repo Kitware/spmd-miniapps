@@ -5,6 +5,8 @@
 #include <TetrahedronMesh.h>
 #include <TriangleMesh.h>
 
+#include <tbb/task_scheduler_init.h>
+
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
 #include <iostream>
@@ -61,6 +63,7 @@ int main(int argc, char* argv[])
     return 1;
     }
 
+  //tbb::task_scheduler_init init(1);
 
   TetrahedronMesh_t tetmesh;
   loadTetrahedronMesh(argv[1], &tetmesh);

@@ -5,6 +5,10 @@
 
 #include <PointLocator3D.h>
 
+#include <tbb/enumerable_thread_specific.h>
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range3d.h>
+
 #include <iostream>
 
 class GetPointPosition
@@ -100,8 +104,70 @@ static inline Float_t lerp(Float_t a, Float_t b, Float_t w)
   return a + (w * (b - a));
 }
 
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh);
+
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<PointLocator_t> TLS_pl;
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::blocked_range3d<int, int, int> Range_t;
+
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval,
+                    TLS_pl &pointLocators, TLS_tm &meshPieces)
+    : input(vol), isoval(isoval), pointLocators(pointLocators),
+      meshPieces(meshPieces)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                      range.rows().begin(), range.rows().end() - 1,
+                      range.pages().begin(), range.pages().end() - 1 };
+    PointLocator_t &ptLocator = this->pointLocators.local();
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, ptLocator,
+                               &meshPiece);
+  }
+
+private:
+  const Image3D_t &input;
+  Float_t isoval;
+  TLS_pl &pointLocators;
+  TLS_tm &meshPieces;
+};
+
+
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+
+  Float_t range[6];
+  for (int i = 0; i < 3; ++i)
+    {
+    range[i * 2] = origin[i];
+    range[(i * 2) + 1] = origin[i] +
+                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
+    }
+
+  PointLocator_t pl(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  IsosurfaceFunctor::TLS_pl pointLocators(pl);
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
+                                       0, dims[0] - 1, 64);
+
+  IsosurfaceFunctor func(vol, isoval, pointLocators, meshPieces);
+  tbb::parallel_for(cellRange, func);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
+}
+
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
@@ -111,29 +177,19 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *buffer = vol.getData();
 
   int sliceSize = dims[0] * dims[1];
-  Float_t range[6];
 
-  // initialize point locator data-structure
-  for (int i = 0; i < 3; ++i)
-    {
-    range[i * 2] = origin[i];
-    range[(i * 2) + 1] = origin[i] +
-                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
-    }
-  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  int ptIdx = pointLocator.numberOfPoints();
   GetPointPosition getPosition(mesh->points);
 
-  int ptIdx = 0;
-
   // march through each cell
-  Float_t zpos = origin[2];
-  for (int zidx = 0; zidx < (dims[2] - 1); ++zidx, zpos += spacing[2])
+  Float_t zpos = origin[2] + (Float_t(ext[4]) * spacing[2]);
+  for (int zidx = ext[4]; zidx <= ext[5]; ++zidx, zpos += spacing[2])
     {
-    Float_t ypos = origin[1];
-    for (int yidx = 0; yidx < (dims[1] - 1); ++yidx, ypos += spacing[1])
+    Float_t ypos = origin[1] + (Float_t(ext[2]) * spacing[1]);
+    for (int yidx = ext[2]; yidx <= ext[3]; ++yidx, ypos += spacing[1])
       {
-      Float_t xpos = origin[0];
-      for (int xidx = 0; xidx < (dims[0] - 1); ++xidx, xpos += spacing[0])
+      Float_t xpos = origin[0] + (Float_t(ext[0]) * spacing[0]);
+      for (int xidx = ext[0]; xidx <= ext[1]; ++xidx, xpos += spacing[0])
         {
         Float_t pos[8][3], grad[8][3];
         Float_t val[8];
@@ -221,7 +277,7 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
             int v2 = MarchingCubesTables::getEdgeVertices(edges[i])[1];
             Float_t w = (isoval - val[v1])/(val[v2] - val[v1]);
 
-            // interpolate vertex position
+            // interpolate vertex position and temporarily add
             mesh->points.push_back(lerp(pos[v1][0], pos[v2][0], w));
             mesh->points.push_back(lerp(pos[v1][1], pos[v2][1], w));
             mesh->points.push_back(lerp(pos[v1][2], pos[v2][2], w));
@@ -267,8 +323,72 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 
 namespace shortvec {
 
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh);
+
+
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<PointLocator_t> TLS_pl;
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::blocked_range3d<int, int, int> Range_t;
+
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval,
+                    TLS_pl &pointLocators, TLS_tm &meshPieces)
+    : input(vol), isoval(isoval), pointLocators(pointLocators),
+      meshPieces(meshPieces)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                      range.rows().begin(), range.rows().end() - 1,
+                      range.pages().begin(), range.pages().end() - 1 };
+    PointLocator_t &ptLocator = this->pointLocators.local();
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, ptLocator,
+                               &meshPiece);
+  }
+
+private:
+  const Image3D_t &input;
+  Float_t isoval;
+  TLS_pl &pointLocators;
+  TLS_tm &meshPieces;
+};
+
+
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+
+  Float_t range[6];
+  for (int i = 0; i < 3; ++i)
+    {
+    range[i * 2] = origin[i];
+    range[(i * 2) + 1] = origin[i] +
+                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
+    }
+
+  PointLocator_t pl(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  IsosurfaceFunctor::TLS_pl pointLocators(pl);
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
+                                       0, dims[0] - 1, 64);
+
+  IsosurfaceFunctor func(vol, isoval, pointLocators, meshPieces);
+  tbb::parallel_for(cellRange, func);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
+}
+
+
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
@@ -278,29 +398,19 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *buffer = vol.getData();
 
   int sliceSize = dims[0] * dims[1];
-  Float_t range[6];
 
-  // initialize point locator data-structure
-  for (int i = 0; i < 3; ++i)
-    {
-    range[i * 2] = origin[i];
-    range[(i * 2) + 1] = origin[i] +
-                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
-    }
-  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  int ptIdx = pointLocator.numberOfPoints();
   GetPointPosition getPosition(mesh->points);
 
-  int ptIdx = 0;
-
   // march through each cell
-  Float_t zpos = origin[2];
-  for (int zidx = 0; zidx < (dims[2] - 1); ++zidx, zpos += spacing[2])
+  Float_t zpos = origin[2] + (static_cast<Float_t>(ext[4]) * spacing[2]);
+  for (int zidx = ext[4]; zidx <= ext[5]; ++zidx, zpos += spacing[2])
     {
-    Float_t ypos = origin[1];
-    for (int yidx = 0; yidx < (dims[1] - 1); ++yidx, ypos += spacing[1])
+    Float_t ypos = origin[1] + (static_cast<Float_t>(ext[2]) * spacing[1]);
+    for (int yidx = ext[2]; yidx <= ext[3]; ++yidx, ypos += spacing[1])
       {
-      Float_t xpos = origin[0];
-      for (int xidx = 0; xidx < (dims[0] - 1); ++xidx, xpos += spacing[0])
+      Float_t xpos = origin[0] + (static_cast<Float_t>(ext[0]) * spacing[0]);
+      for (int xidx = ext[0]; xidx <= ext[1]; ++xidx, xpos += spacing[0])
         {
         Float_t pos[8][3], grad[8][3];
         Float_t val[8];
@@ -433,10 +543,42 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 
 namespace simd {
 
-struct VertexId
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh);
+
+
+class IsosurfaceFunctor
 {
-  int idx, id;
+public:
+  typedef tbb::enumerable_thread_specific<PointLocator_t> TLS_pl;
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::blocked_range3d<int, int, int> Range_t;
+
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval,
+                    TLS_pl &pointLocators, TLS_tm &meshPieces)
+    : input(vol), isoval(isoval), pointLocators(pointLocators),
+      meshPieces(meshPieces)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                      range.rows().begin(), range.rows().end() - 1,
+                      range.pages().begin(), range.pages().end() - 1 };
+    PointLocator_t &ptLocator = this->pointLocators.local();
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, ptLocator,
+                               &meshPiece);
+  }
+
+private:
+  const Image3D_t &input;
+  Float_t isoval;
+  TLS_pl &pointLocators;
+  TLS_tm &meshPieces;
 };
+
 
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
@@ -444,22 +586,60 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const int *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
+
+  Float_t range[6];
+  for (int i = 0; i < 3; ++i)
+    {
+    range[i * 2] = origin[i];
+    range[(i * 2) + 1] = origin[i] +
+                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
+    }
+
+  PointLocator_t pl(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  IsosurfaceFunctor::TLS_pl pointLocators(pl);
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
+                                       0, dims[0] - 1, 64);
+
+  IsosurfaceFunctor func(vol, isoval, pointLocators, meshPieces);
+  tbb::parallel_for(cellRange, func);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
+}
+
+
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, PointLocator_t &pointLocator, TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
   const Float_t *buffer = vol.getData();
 
-  int totalCells = (dims[0] - 1) * (dims[1] - 1) * (dims[2] - 1);
+  int blockDim[3] = { ext[1] - ext[0] + 1, ext[3] - ext[2] + 1,
+                      ext[5] - ext[4] + 1 };
+
+  int totalCells = blockDim[0] * blockDim[1] * blockDim[2];
   std::vector<int> cases(totalCells);
-  int activeCells = ispc::getCellCases(buffer, dims, isoval, &cases[0]);
+  int activeCells = ispc::getCellCases(buffer, dims, ext, blockDim, isoval,
+                                       &cases[0]);
 
   int ntris = 0;
   std::vector<int> cellIndex(activeCells), vertInds(activeCells);
-  for (int s = 0, d = 0; d < totalCells; ++d)
+  for (int z = ext[4], s = 0, d = 0; z <= ext[5]; ++z)
     {
-    if (cases[d] != 0 && cases[d] != 255)
+    for (int y = ext[2]; y <= ext[3]; ++y)
       {
-      cellIndex[s] = d;
-      vertInds[s] = ntris * 3 * 3;
-      cases[s++] = cases[d];
-      ntris += MarchingCubesTables::getNumberOfTriangles(cases[d]);
+      for (int x = ext[0]; x <= ext[1]; ++x, ++s)
+        {
+        if (cases[s] != 0 && cases[s] != 255)
+          {
+          cellIndex[d] = z * (dims[0] - 1) * (dims[1] - 1) +
+                         y * (dims[0] - 1) + x;
+          vertInds[d] = ntris * 3 * 3;
+          cases[d++] = cases[s];
+          ntris += MarchingCubesTables::getNumberOfTriangles(cases[s]);
+          }
+        }
       }
     }
   cases.resize(activeCells);
@@ -474,19 +654,11 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                                &(vertInds[0]), &(points[0]), &normals[0]);
 
   // remove duplicates
-  Float_t range[6];
-  for (int i = 0; i < 3; ++i)
-    {
-    range[i * 2] = origin[i];
-    range[(i * 2) + 1] = origin[i] +
-                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
-    }
-  PointLocator_t pointLocator(range, dims[0]/8, dims[1]/8, dims[2]/8);
   GetPointPosition getPosition(mesh->points);
 
-  mesh->indexes.reserve(nverts);
   int tri[3];
-  for (int i = 0, j = 0, ptid = 0; i < nverts; ++i, ++j)
+  for (int i = 0, j = 0, ptid = pointLocator.numberOfPoints(); i < nverts;
+       ++i, ++j)
     {
     bool exists = false;
 

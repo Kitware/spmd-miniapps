@@ -2,32 +2,14 @@
 #include "Isosurface.ispc.h"
 #include "MarchingTetsTables.h"
 
-#include <PointLocator3D.h>
+#include <tbb/enumerable_thread_specific.h>
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range3d.h>
 
 #include <boost/unordered_map.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
-
-class GetPositionFromIndex
-{
-public:
-  GetPositionFromIndex(const std::vector<Float_t> &points,
-                       const Float_t *thispt)
-    : points(points), thispt(thispt)
-  {
-  }
-
-  const Float_t * operator()(int ptind) const
-  {
-  return (this->points.size() == static_cast<size_t>(ptind * 3)) ?
-          this->thispt : &(this->points[ptind * 3]);
-  }
-
-private:
-  const std::vector<Float_t> &points;
-  const Float_t *thispt;
-};
 
 
 struct EdgeKey
@@ -101,24 +83,14 @@ inline void computeTetrahedronMeshBoundingBox(const TetrahedronMesh_t &tetmesh,
 }
 
 
-#define USE_HASHING_LOCATOR 1
-
-void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
-                       TriangleMesh_t *trimesh)
+void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
+  int from, int to, Float_t isoval, EdgeUnorderedMap &emap,
+  TriangleMesh_t *trimesh)
 {
   static const int caseMask[4] = { 1, 2, 4, 8 };
 
-#if !USE_HASHING_LOCATOR
-  Float_t range[6] = { 0, 0, 0, 0, 0, 0 };
-  computeTetrahedronMeshBoundingBox(tetmesh, range);
-
-  PointLocator3D<Float_t, int, GetPositionFromIndex> ptlocator(range,
-                                                               32, 32, 32);
-#else
-  EdgeUnorderedMap emap;
-#endif
-
-  for (int i = 0, npts = 0; i < tetmesh.numberOfTetrahedra(); ++i)
+  int npts = trimesh->points.size()/3;
+  for (int i = from; i < to; ++i)
     {
     int ptinds[4];
     std::copy(tetmesh.indexes.begin() + (i * 4),
@@ -164,11 +136,6 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
           verts[e][ii] = lerp(x1, x2, w);
           }
 
-#if !USE_HASHING_LOCATOR
-        GetPositionFromIndex gp(trimesh->points, verts[e]);
-        bool exists = false;
-        vinds[e] = *ptlocator.insert(npts, &exists, gp);
-#else
         EdgeKey ekey(ptinds[v1], ptinds[v2]);
         EdgeUnorderedMap::iterator loc = emap.find(ekey);
         bool exists = (loc != emap.end());
@@ -176,10 +143,6 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
         if (!exists)
           {
           emap[ekey] = npts;
-          }
-#endif
-        if (!exists)
-          {
           for (int ii = 0; ii < 3; ++ii)
             {
             trimesh->points.push_back(verts[e][ii]);
@@ -201,11 +164,72 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
         }
       }
     }
+}
 
-  for (size_t i = 0; i < trimesh->normals.size(); i += 3)
-    {
-    normalize(&(trimesh->normals[i]));
-    }
+class NormalizeFunctor
+{
+public:
+  typedef tbb::blocked_range<int> Range_t;
+
+  NormalizeFunctor(std::vector<Float_t> *normals) : normals(normals)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    for (int i = range.begin(); i < range.end(); ++i)
+      {
+      normalize(&(this->normals->at(i * 3)));
+      }
+  }
+
+private:
+  std::vector<Float_t> *normals;
+};
+
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::enumerable_thread_specific<EdgeUnorderedMap> TLS_em;
+  typedef tbb::blocked_range<int> Range_t;
+
+  IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
+    TLS_em &edgeMaps, TLS_tm &meshPieces)
+    : tetmesh(tetmesh), isoval(isoval), edgeMaps(edgeMaps),
+      meshPieces(meshPieces)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    EdgeUnorderedMap &edgeMap = this->edgeMaps.local();
+    extractIsosurfaceFromTetsRange(this->tetmesh, range.begin(), range.end(),
+      this->isoval, edgeMap, &meshPiece);
+  }
+
+private:
+  const TetrahedronMesh_t &tetmesh;
+  Float_t isoval;
+  TLS_em &edgeMaps;
+  TLS_tm &meshPieces;
+};
+
+void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
+                       TriangleMesh_t *trimesh)
+{
+  IsosurfaceFunctor::TLS_em edgeMaps;
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t tetsRange(0, tetmesh.numberOfTetrahedra());
+  IsosurfaceFunctor func(tetmesh, isoval, edgeMaps, meshPieces);
+  tbb::parallel_for(tetsRange, func);
+
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), trimesh);
+
+  NormalizeFunctor::Range_t normRange(0, trimesh->numberOfVertices());
+  NormalizeFunctor nfunc(&trimesh->normals);
+  tbb::parallel_for(normRange, nfunc);
 }
 
 }; // namespace scalar
@@ -218,7 +242,7 @@ const int GANG_SIZE = ISPC_GANG_SIZE;
 
 inline size_t getSOASize(size_t aos_size, size_t gangSize)
 {
-  return (aos_size + (aos_size % gangSize));
+  return (aos_size + gangSize - (aos_size % gangSize));
 }
 
 inline size_t getNumberOfGangs(size_t aos_size, size_t gangSize)
@@ -251,14 +275,15 @@ struct TetInfoB
 
 using ispc::TetInfo_soa;
 
-void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
-                       TriangleMesh_t *trimesh)
+void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
+  int from, int to, Float_t isoval, EdgeUnorderedMap &emap,
+  TriangleMesh_t *trimesh)
 {
   static const int caseMask[4] = { 1, 2, 4, 8 };
 
   std::vector<TetInfoA> tetInfoA;
   std::vector<TetInfoB> tetInfoB;
-  for (int i = 0, idx = 0; i < tetmesh.numberOfTetrahedra(); ++i)
+  for (int i = from, idx = 0; i < to; ++i)
     {
     TetInfoA tiA;
     TetInfoB tiB;
@@ -326,13 +351,17 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
                                &triPoints[0], &triPointKeys[0],
                                &triCellNorms[0]);
 
-  EdgeUnorderedMap emap;
 
   std::vector<int> triIndexes(numTriangles * 3);
-  std::vector<Float_t>
-    triPtNorms(getSOASize(triPoints.size(), GANG_SIZE * 3), 0);
 
-  int numPts = 0;
+  int curNumPts = trimesh->points.size()/3;
+#if USE_VECTORIZED_NORMALIZE
+  // resize for potential new normals
+  trimesh->normals.resize(getSOASize((curNumPts + numVerts) * 3,
+    GANG_SIZE * 3), 0);
+#endif
+
+  int numPts = 0, ptIdx = curNumPts;
   for (int t = 0, i = 0; t < numTriangles; ++t)
     {
     for (int v = 0; v < 3; ++v, ++i)
@@ -349,8 +378,14 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
           triPoints[d++] = triPoints[s++];
           triPoints[d++] = triPoints[s++];
           }
-        ind = numPts++;
+#if !USE_VECTORIZED_NORMALIZE
+        trimesh->normals.push_back(0.0);
+        trimesh->normals.push_back(0.0);
+        trimesh->normals.push_back(0.0);
+#endif
+        ind = ptIdx++;
         emap[k] = ind;
+        ++numPts;
         }
       else
         {
@@ -363,10 +398,10 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
       for (int ii = 0; ii < 3; ++ii)
         {
 #if USE_VECTORIZED_NORMALIZE
-        triPtNorms[didx + (ii * GANG_SIZE)] +=
+        trimesh->normals[didx + (ii * GANG_SIZE)] +=
           triCellNorms[sidx + (ii * GANG_SIZE)];
 #else
-        triPtNorms[ind * 3 + ii] +=
+        trimesh->normals[ind * 3 + ii] +=
           triCellNorms[sidx + (ii * GANG_SIZE)];
 #endif
         }
@@ -374,20 +409,81 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     }
   triPoints.resize(numPts * 3);
 
+  trimesh->points.insert(trimesh->points.end(), triPoints.begin(),
+                         triPoints.end());
+  trimesh->indexes.insert(trimesh->indexes.end(), triIndexes.begin(),
+                          triIndexes.end());
 #if USE_VECTORIZED_NORMALIZE
-  ispc::normalizeNormals(&triPtNorms[0], numPts);
-  triPtNorms.resize(numPts * 3);
-#else
-  triPtNorms.resize(numPts * 3);
-  for (size_t i = 0; i < triPtNorms.size(); i += 3)
-    {
-    scalar::normalize(&triPtNorms[i]);
-    }
+  // resize to fit
+  trimesh->normals.resize(getSOASize((curNumPts + numPts) * 3, GANG_SIZE * 3));
+#endif
+}
+
+
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::enumerable_thread_specific<EdgeUnorderedMap> TLS_em;
+  typedef tbb::blocked_range<int> Range_t;
+
+  IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
+    TLS_em &edgeMaps, TLS_tm &meshPieces)
+    : tetmesh(tetmesh), isoval(isoval), edgeMaps(edgeMaps),
+      meshPieces(meshPieces)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    EdgeUnorderedMap &edgeMap = this->edgeMaps.local();
+    extractIsosurfaceFromTetsRange(this->tetmesh, range.begin(), range.end(),
+      this->isoval, edgeMap, &meshPiece);
+  }
+
+private:
+  const TetrahedronMesh_t &tetmesh;
+  Float_t isoval;
+  TLS_em &edgeMaps;
+  TLS_tm &meshPieces;
+};
+
+class NormalizeFunctor
+{
+public:
+  void operator()(const IsosurfaceFunctor::TLS_tm::range_type &range) const
+  {
+    for (IsosurfaceFunctor::TLS_tm::iterator it = range.begin();
+         it != range.end(); ++it)
+      {
+      int count = it->numberOfVertices();
+      ispc::normalizeNormals(&it->normals[0], count);
+      it->normals.resize(count * 3);
+      }
+  }
+};
+
+void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
+                       TriangleMesh_t *trimesh)
+{
+  IsosurfaceFunctor::TLS_em edgeMaps;
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t tetsRange(0, tetmesh.numberOfTetrahedra());
+  IsosurfaceFunctor func(tetmesh, isoval, edgeMaps, meshPieces);
+  tbb::parallel_for(tetsRange, func);
+
+#if USE_VECTORIZED_NORMALIZE
+  tbb::parallel_for(meshPieces.range(), simd::NormalizeFunctor());
 #endif
 
-  trimesh->points.swap(triPoints);
-  trimesh->normals.swap(triPtNorms);
-  trimesh->indexes.swap(triIndexes);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), trimesh);
+
+#if !USE_VECTORIZED_NORMALIZE
+  scalar::NormalizeFunctor::Range_t normRange(0, trimesh->numberOfVertices());
+  scalar::NormalizeFunctor nfunc(&trimesh->normals);
+  tbb::parallel_for(normRange, nfunc);
+#endif
 }
 
 }; // namespace simd
@@ -399,9 +495,13 @@ namespace simd_2
 
 struct TriMeshHandle
 {
-  TriangleMesh_t *trimesh;
+  TriangleMesh_t trimesh;
   EdgeUnorderedMap emap;
   int npts;
+
+  TriMeshHandle() : npts(0)
+  {
+  }
 };
 
 
@@ -423,41 +523,88 @@ extern "C" void addTriangleToOutput(void* trimeshHandle, Float_t verts[3][3],
       {
       for (int ii = 0; ii < 3; ++ii)
         {
-        th.trimesh->points.push_back(verts[v][ii]);
-        th.trimesh->normals.push_back(0);
+        th.trimesh.points.push_back(verts[v][ii]);
+        th.trimesh.normals.push_back(0);
         }
       vind = th.npts++;
       th.emap[ekey] = vind;
       }
 
-    th.trimesh->indexes.push_back(vind);
-    th.trimesh->normals[vind * 3 + 0] += normal[0];
-    th.trimesh->normals[vind * 3 + 1] += normal[1];
-    th.trimesh->normals[vind * 3 + 2] += normal[2];
+    th.trimesh.indexes.push_back(vind);
+    th.trimesh.normals[vind * 3 + 0] += normal[0];
+    th.trimesh.normals[vind * 3 + 1] += normal[1];
+    th.trimesh.normals[vind * 3 + 2] += normal[2];
     }
 }
 
+
+void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
+  int from, int to, Float_t isoval, TriMeshHandle &tmh)
+{
+  const int *tetIdxPtr = &tetmesh.indexes[from * 4];
+  int numTets = to - from;
+  ispc::extractIosurface_impl_v2(&tetmesh.points[0], &tetmesh.values[0],
+                                 tetIdxPtr, tetmesh.numberOfPoints(),
+                                 numTets, isoval,
+                                 MarchingTetsTables::getCaseTrianglesEdges(0),
+                                 MarchingTetsTables::getEdgeVertices(0),
+                                 &tmh);
+}
+
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<TriMeshHandle> TLS_tmh;
+  typedef tbb::blocked_range<int> Range_t;
+
+  IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
+    TLS_tmh &trimeshHandles)
+    : tetmesh(tetmesh), isoval(isoval), trimeshHandles(trimeshHandles)
+  {
+  }
+
+  void operator()(const Range_t &range) const
+  {
+    TriMeshHandle &myMesh = this->trimeshHandles.local();
+    extractIsosurfaceFromTetsRange(this->tetmesh, range.begin(), range.end(),
+      this->isoval, myMesh);
+  }
+
+private:
+  const TetrahedronMesh_t &tetmesh;
+  Float_t isoval;
+  TLS_tmh &trimeshHandles;
+};
+
+
+inline void swapTrianlgeMeshes(TriangleMesh_t &m1, TriangleMesh_t &m2)
+{
+  m1.points.swap(m2.points);
+  m1.normals.swap(m2.normals);
+  m1.indexes.swap(m2.indexes);
+}
 
 void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
                        TriangleMesh_t *trimesh)
 {
-  TriMeshHandle th;
-  th.trimesh = trimesh;
-  th.npts = 0;
+  IsosurfaceFunctor::TLS_tmh trimeshHandles;
+  IsosurfaceFunctor::Range_t tetsRange(0, tetmesh.numberOfTetrahedra());
+  IsosurfaceFunctor func(tetmesh, isoval, trimeshHandles);
+  tbb::parallel_for(tetsRange, func);
 
-  ispc::extractIosurface_impl_v2(&tetmesh.points[0], &tetmesh.values[0],
-                                 &tetmesh.indexes[0], tetmesh.numberOfPoints(),
-                                 tetmesh.numberOfTetrahedra(), isoval,
-                                 MarchingTetsTables::getCaseTrianglesEdges(0),
-                                 MarchingTetsTables::getEdgeVertices(0),
-                                 &th);
-
-  for (size_t i = 0; i < trimesh->normals.size(); i += 3)
+  std::vector<TriangleMesh_t> meshes(trimeshHandles.size());
+  int i = 0;
+  for (IsosurfaceFunctor::TLS_tmh::iterator it = trimeshHandles.begin();
+    it != trimeshHandles.end(); ++it)
     {
-    scalar::normalize(&(trimesh->normals[i]));
+    swapTrianlgeMeshes(meshes[i++], it->trimesh);
     }
+  mergeTriangleMeshes(meshes.begin(), meshes.end(), trimesh);
+
+  scalar::NormalizeFunctor::Range_t normRange(0, trimesh->numberOfVertices());
+  scalar::NormalizeFunctor nfunc(&trimesh->normals);
+  tbb::parallel_for(normRange, nfunc);
 }
 
 }; // namespace simd_2
-
 

@@ -2,12 +2,13 @@
 #include "MarchingCubesTables.h"
 #include "MarchingCubesV2.ispc.h"
 
-#include <boost/chrono.hpp>
+#include <tbb/enumerable_thread_specific.h>
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range3d.h>
 
 #include <iostream>
 #include <vector>
 
-typedef boost::chrono::steady_clock Clock;
 
 inline void generateEdgeIdOffsets(int xdim, int xydim, int offsets[12])
 {
@@ -62,12 +63,7 @@ inline Float_t lerp(Float_t a, Float_t b, Float_t w)
   return a + (w * (b - a));
 }
 
-static const char * partDesc[] = { "Begin", "Compute case ids",
-                                   "Remove empty cells and sort by caseId",
-                                   "Generate edges",
-                                   "Remove invalid edges and sort by edge id",
-                                   "Merge duplicate edges, generate indexes",
-                                   "Compute gradients and generate vertices" };
+
 
 namespace scalar_2 {
 
@@ -119,8 +115,8 @@ public:
   }
 };
 
-void extractIsosurface(const Image3D_t &vol, Float_t isoval,
-                       TriangleMesh_t *mesh)
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
   static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
@@ -137,20 +133,17 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   int edgeIdOffsets[12];
   generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
-  Clock::time_point checkpoints[7];
-
   // part 1: compute caseId of each cell
-  checkpoints[0] = Clock::now();
-
-  int ncells = (dims[0] - 1) * (dims[1] - 1) * (dims[2] - 1);
+  int ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
+               (ext[5] - ext[4] + 1);
   std::vector<CellInfo> cellInfo;
   cellInfo.reserve(ncells);
 
-  for (int zidx = 0; zidx < (dims[2] - 1); ++zidx)
+  for (int zidx = ext[4]; zidx <= ext[5]; ++zidx)
     {
-    for (int yidx = 0; yidx < (dims[1] - 1); ++yidx)
+    for (int yidx = ext[2]; yidx <= ext[3]; ++yidx)
       {
-      for (int xidx = 0; xidx < (dims[0] - 1); ++xidx)
+      for (int xidx = ext[0]; xidx <= ext[1]; ++xidx)
         {
         Float_t val[8];
         int idx = xidx + (yidx * dims[0]) + (zidx * xydim);
@@ -177,16 +170,12 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 
   // part 2: remove empty cells and sort by caseId
-  checkpoints[1] = Clock::now();
-
   std::vector<CellInfo>::iterator newEnd
     = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
   cellInfo.resize(newEnd - cellInfo.begin());
   std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
 
   // part 3: generate edges
-  checkpoints[2] = Clock::now();
-
   ncells = cellInfo.size();
   std::vector<EdgeInfo> edgeInfo(ncells * 15);
   for (int i = 0, pos = 0; i < ncells; ++i)
@@ -220,18 +209,14 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 
   // part 4: remove invalid edges and sort by unique edgeId
-  checkpoints[3] = Clock::now();
-
   std::vector<EdgeInfo>::iterator newEnd1
     = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
   edgeInfo.resize(newEnd1 - edgeInfo.begin());
   std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
 
   // part 5: merge duplicate edges, generate indexes
-  checkpoints[4] = Clock::now();
-
   std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0;
+  size_t last = 0, ptsIdxOffset = mesh->points.size()/3;
   for (size_t i = 0; i < edgeInfo.size(); ++i)
     {
     if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
@@ -241,17 +226,13 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
         edgeInfo[last] = edgeInfo[i];
         }
       }
-    indexes[edgeInfo[i].pos] = last;
+    indexes[edgeInfo[i].pos] = last + ptsIdxOffset;
     }
   edgeInfo.resize(last + 1);
 
+  mesh->indexes.insert(mesh->indexes.end(), indexes.begin(), indexes.end());
+
   // part 6: compute gradients and generate vertices
-  checkpoints[5] = Clock::now();
-
-  std::vector<Float_t> points, normals;
-  points.reserve(edgeInfo.size() * 3);
-  normals.reserve(edgeInfo.size() * 3);
-
   for (size_t i = 0;  i < edgeInfo.size(); ++i)
     {
     const EdgeInfo &ei = edgeInfo[i];
@@ -279,33 +260,63 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 
     for (int ii = 0; ii < 3; ++ii)
       {
-      points.push_back(lerp(pos1[ii], pos2[ii], w));
-      normals.push_back(lerp(grad1[ii], grad2[ii], w));
+      mesh->points.push_back(lerp(pos1[ii], pos2[ii], w));
+      mesh->normals.push_back(lerp(grad1[ii], grad2[ii], w));
       }
     }
+}
 
-  checkpoints[6] = Clock::now();
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::blocked_range3d<int, int, int> Range_t;
 
-  mesh->points.swap(points);
-  mesh->normals.swap(normals);
-  mesh->indexes.swap(indexes);
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
+    : input(vol), isoval(isoval), meshPieces(meshPieces)
+  {
+  }
 
-  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
-  std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
-  for (int i = 1; i < 7; ++i)
-    {
-    boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
-    double pc = (100.0 * dur.count())/total.count();
-    std::cout << "Part " << i << " - " << partDesc[i] << ": "
-              << dur.count() << " seconds, " << pc << "%" << std::endl;
-    }
+  void operator()(const Range_t &range) const
+  {
+    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                      range.rows().begin(), range.rows().end() - 1,
+                      range.pages().begin(), range.pages().end() - 1 };
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, &meshPiece);
+  }
+
+private:
+  const Image3D_t &input;
+  Float_t isoval;
+  TLS_tm &meshPieces;
+};
+
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
+                                       0, dims[0] - 1, 64);
+
+  IsosurfaceFunctor func(vol, isoval, meshPieces);
+  tbb::parallel_for(cellRange, func);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }
 
 }; //namespace scalar_2
 
 namespace simd_2 {
 
-using ispc::CellInfo;
+struct CellInfo
+{
+  int idx[3];
+  int caseId;
+};
 
 class CaseIdIsLess
 {
@@ -349,8 +360,8 @@ public:
   }
 };
 
-void extractIsosurface(const Image3D_t &vol, Float_t isoval,
-                       TriangleMesh_t *mesh)
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+  Float_t isoval, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
   static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
@@ -367,28 +378,34 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   int edgeIdOffsets[12];
   generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
-  Clock::time_point checkpoints[7];
-
   // part 1: compute caseId of each cell
-  checkpoints[0] = Clock::now();
+  int ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
+               (ext[5] - ext[4] + 1);
+  std::vector<int> caseIds(ncells);
+  ispc::getCellCaseIds(buffer, dims, ext, isoval, &caseIds[0]);
 
-  int ncells = (dims[0] - 1) * (dims[1] - 1) * (dims[2] - 1);
   std::vector<CellInfo> cellInfo(ncells);
-
-  ispc::getCellCaseIds(buffer, dims, isoval, &cellInfo[0]);
-
+  for (int z = ext[4], i = 0; z <= ext[5]; ++z)
+    {
+    for (int y = ext[2]; y <= ext[3]; ++y)
+      {
+      for (int x = ext[0]; x <= ext[1]; ++x, ++i)
+        {
+        cellInfo[i].idx[0] = x;
+        cellInfo[i].idx[1] = y;
+        cellInfo[i].idx[2] = z;
+        cellInfo[i].caseId = caseIds[i];
+        }
+      }
+    }
 
   // part 2: remove empty cells and sort by caseId
-  checkpoints[1] = Clock::now();
-
   std::vector<CellInfo>::iterator newEnd
     = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
   cellInfo.resize(newEnd - cellInfo.begin());
   std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
 
   // part 3: generate edges
-  checkpoints[2] = Clock::now();
-
   ncells = cellInfo.size();
   std::vector<EdgeInfo> edgeInfo(ncells * 15);
   for (int i = 0, pos = 0; i < ncells; ++i)
@@ -422,18 +439,14 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
     }
 
   // part 4: remove invalid edges and sort by unique edgeId
-  checkpoints[3] = Clock::now();
-
   std::vector<EdgeInfo>::iterator newEnd1
     = std::remove_if(edgeInfo.begin(), edgeInfo.end(), EdgeIsInvalid());
   edgeInfo.resize(newEnd1 - edgeInfo.begin());
   std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
 
   // part 5: merge duplicate edges, generate indexes
-  checkpoints[4] = Clock::now();
-
   std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0;
+  size_t last = 0, ptsIdxOffset = mesh->points.size()/3;
   for (size_t i = 0; i < edgeInfo.size(); ++i)
     {
     if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
@@ -443,17 +456,13 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
         edgeInfo[last] = edgeInfo[i];
         }
       }
-    indexes[edgeInfo[i].pos] = last;
+    indexes[edgeInfo[i].pos] = last + ptsIdxOffset;
     }
   edgeInfo.resize(last + 1);
 
+  mesh->indexes.insert(mesh->indexes.end(), indexes.begin(), indexes.end());
+
   // part 6: compute gradients and generate vertices
-  checkpoints[5] = Clock::now();
-
-  std::vector<Float_t> points, normals;
-  points.reserve(edgeInfo.size() * 3);
-  normals.reserve(edgeInfo.size() * 3);
-
   for (size_t i = 0;  i < edgeInfo.size(); ++i)
     {
     const EdgeInfo &ei = edgeInfo[i];
@@ -481,26 +490,52 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 
     for (int ii = 0; ii < 3; ++ii)
       {
-      points.push_back(lerp(pos1[ii], pos2[ii], w));
-      normals.push_back(lerp(grad1[ii], grad2[ii], w));
+      mesh->points.push_back(lerp(pos1[ii], pos2[ii], w));
+      mesh->normals.push_back(lerp(grad1[ii], grad2[ii], w));
       }
     }
+}
 
-  checkpoints[6] = Clock::now();
+class IsosurfaceFunctor
+{
+public:
+  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
+  typedef tbb::blocked_range3d<int, int, int> Range_t;
 
-  mesh->points.swap(points);
-  mesh->normals.swap(normals);
-  mesh->indexes.swap(indexes);
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
+    : input(vol), isoval(isoval), meshPieces(meshPieces)
+  {
+  }
 
-  boost::chrono::duration<double> total = checkpoints[6] - checkpoints[0];
-  std::cout << "Timings: (total = " << total.count() << ")" << std::endl;
-  for (int i = 1; i < 7; ++i)
-    {
-    boost::chrono::duration<double> dur = checkpoints[i] - checkpoints[i - 1];
-    double pc = (100.0 * dur.count())/total.count();
-    std::cout << "Part " << i << " - " << partDesc[i] << ": "
-              << dur.count() << " seconds, " << pc << "%" << std::endl;
-    }
+  void operator()(const Range_t &range) const
+  {
+    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                      range.rows().begin(), range.rows().end() - 1,
+                      range.pages().begin(), range.pages().end() - 1 };
+    TriangleMesh_t &meshPiece = this->meshPieces.local();
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, &meshPiece);
+  }
+
+private:
+  const Image3D_t &input;
+  Float_t isoval;
+  TLS_tm &meshPieces;
+};
+
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+
+  IsosurfaceFunctor::TLS_tm meshPieces;
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
+                                       0, dims[0] - 1, 64);
+
+  IsosurfaceFunctor func(vol, isoval, meshPieces);
+  tbb::parallel_for(cellRange, func);
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }
 
 }; //namespace simd_2

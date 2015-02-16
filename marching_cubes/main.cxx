@@ -5,6 +5,8 @@
 #include <SaveTriangleMesh.h>
 #include <TriangleMesh.h>
 
+#include <tbb/task_scheduler_init.h>
+
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
 #include <iostream>
@@ -65,6 +67,7 @@ int main(int argc, char* argv[])
     std::cout << "Invalid implementation" << std::endl;
     }
 
+  //tbb::task_scheduler_init init(1);
 
   Image3D_t volume;
   loadImage3D(argv[1], &volume);

@@ -8,6 +8,7 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
+find_package (TBB REQUIRED)
 
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
   set (MIC_BUILD ON)
@@ -57,6 +58,7 @@ add_definitions ( -DISPC_GANG_SIZE=${TET_MESH_CONT_ISPC_GANG_SIZE} )
 
 include_directories (
   ${Boost_INCLUDE_DIRS}
+  ${TBB_INCLUDE_DIRS}
   "${CMAKE_CURRENT_SOURCE_DIR}/../utils"
 )
 
@@ -70,5 +72,6 @@ add_executable (TetmeshContour MACOSX_BUNDLE
 target_link_libraries (TetmeshContour
   ${ISPC_OBJS}
   ${Boost_LIBRARIES}
+  ${TBB_LIBRARIES}
 )
 
