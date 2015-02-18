@@ -11,6 +11,7 @@
 #include <cmath>
 #include <iostream>
 
+static const int grainSize = 64 * 1024;
 
 struct EdgeKey
 {
@@ -203,6 +204,8 @@ public:
 
   void operator()(const Range_t &range) const
   {
+    //std::cout << "Processing range: [" << range.begin() << "," << range.end()
+    //          << "] ntets=" << range.size() << std::endl;
     TriangleMesh_t &meshPiece = this->meshPieces.local();
     EdgeUnorderedMap &edgeMap = this->edgeMaps.local();
     extractIsosurfaceFromTetsRange(this->tetmesh, range.begin(), range.end(),
@@ -221,15 +224,20 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
 {
   IsosurfaceFunctor::TLS_em edgeMaps;
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t tetsRange(0, tetmesh.numberOfTetrahedra());
+  IsosurfaceFunctor::Range_t tetsRange(0, tetmesh.numberOfTetrahedra(),
+                                       grainSize);
   IsosurfaceFunctor func(tetmesh, isoval, edgeMaps, meshPieces);
   tbb::parallel_for(tetsRange, func);
 
   mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), trimesh);
 
-  NormalizeFunctor::Range_t normRange(0, trimesh->numberOfVertices());
+  NormalizeFunctor::Range_t normRange(0, trimesh->numberOfVertices(),
+                                      grainSize);
   NormalizeFunctor nfunc(&trimesh->normals);
   tbb::parallel_for(normRange, nfunc);
+
+  //std::cout << "Computed using " << meshPieces.size() << " threads"
+  //          << std::endl;
 }
 
 }; // namespace scalar
