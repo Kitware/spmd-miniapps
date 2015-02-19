@@ -14,14 +14,16 @@
 
 typedef boost::chrono::steady_clock Clock;
 
-static const char * impstr[] = { "scalar", "shortvec", "simd", "scalar_2",
-                                 "simd_2", "scalar_2.1", "simd_2.1" };
+static const char * impstr[] = { "scalar", "shortvec", "simd", "omp_scalar", 
+                                 "scalar_2", "simd_2", "scalar_2.1",
+                                 "simd_2.1" };
 
 enum ImplementationId
 {
   IMP_SCALAR = 0,
   IMP_SHORTVEC,
   IMP_SIMD,
+  IMP_OMP_SCALAR,
   IMP_SCALAR_2,
   IMP_SIMD_2,
   IMP_SCALAR_2_1,
@@ -88,6 +90,9 @@ int main(int argc, char* argv[])
       break;
     case IMP_SIMD:
       simd::extractIsosurface(volume, isoval, &mesh);
+      break;
+    case IMP_OMP_SCALAR:
+      ompimp::extractIsosurface(volume, isoval, &mesh);
       break;
     case IMP_SCALAR_2:
       scalar_2::extractIsosurface(volume, isoval, &mesh);

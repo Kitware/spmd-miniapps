@@ -9,6 +9,8 @@
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range3d.h>
 
+#include <omp.h>
+
 #include <iostream>
 
 class GetPointPosition
@@ -326,6 +328,62 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
 }
 
 }; //namespace scalar
+
+namespace ompimp
+{
+
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh)
+{
+  const int *dims = vol.getDimension();
+  const Float_t *origin = vol.getOrigin();
+  const Float_t *spacing = vol.getSpacing();
+
+  Float_t range[6];
+  for (int i = 0; i < 3; ++i)
+    {
+    range[i * 2] = origin[i];
+    range[(i * 2) + 1] = origin[i] +
+                         (static_cast<Float_t>(dims[i] - 1) * spacing[i]);
+    }
+
+  PointLocator_t pl(range, dims[0]/8, dims[1]/8, dims[2]/8);
+  std::vector<TriangleMesh_t> meshPieces;
+
+  int blocksDim[] = {(dims[0] - 1 + 63)/64, (dims[1] - 1 + 63)/64,
+                     (dims[2] - 1 + 63)/64};
+  int nblocks = blocksDim[0] * blocksDim[1] * blocksDim[2];
+
+# pragma omp parallel for firstprivate(pl) shared(meshPieces)
+  for (int i = 0; i < nblocks; ++i)
+    {
+#     pragma omp critical
+      if (meshPieces.empty())
+        {
+        meshPieces.resize(omp_get_num_threads());
+        }
+
+      int blockIdx[3];
+      blockIdx[2] = i/(blocksDim[0] * blocksDim[1]);
+      blockIdx[1] = (i%(blocksDim[0] * blocksDim[1]))/blocksDim[0];
+      blockIdx[0] = (i%(blocksDim[0] * blocksDim[1]))%blocksDim[0];
+
+      int extent[6];
+      extent[0] = blockIdx[0] * 64;
+      extent[1] = std::min(extent[0] + 63, dims[0] - 2);
+      extent[2] = blockIdx[1] * 64;
+      extent[3] = std::min(extent[2] + 63, dims[1] - 2);
+      extent[4] = blockIdx[2] * 64;
+      extent[5] = std::min(extent[4] + 63, dims[2] - 2);
+
+      scalar::extractIsosurfaceFromBlock(vol, extent, isoval, pl,
+        &meshPieces[omp_get_thread_num()]);
+    }
+
+  mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
+}
+
+}
 
 namespace shortvec {
 

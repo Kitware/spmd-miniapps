@@ -18,6 +18,11 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);
 };
 
+namespace ompimp {
+void extractIsosurface(const Image3D_t &vol, Float_t isoval,
+                       TriangleMesh_t *mesh);
+}
+
 namespace scalar_2 {
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh);

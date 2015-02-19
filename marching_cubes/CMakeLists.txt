@@ -9,6 +9,7 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 find_package (TBB REQUIRED)
+find_package (OpenMP)
 
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
   set (MIC_BUILD ON)
@@ -19,6 +20,7 @@ set (EXTRA_COMPILER_FLAGS
   CACHE STRING ""
 )
 add_definitions (${EXTRA_COMPILER_FLAGS})
+add_definitions (${OpenMP_CXX_FLAGS})
 
 set (MARCHING_CUBES_TYPE_DOUBLE ON CACHE BOOL "")
 configure_file(
@@ -73,5 +75,6 @@ target_link_libraries (MarchingCubes
   ${ISPC_OBJS}
   ${Boost_LIBRARIES}
   ${TBB_LIBRARIES}
+  ${OpenMP_CXX_FLAGS}
 )
 
