@@ -5,7 +5,7 @@
 
 static const char *names[] = { "unknown", "char", "short", "int", "float",
                                "double" };
-static const int sizes[] = { 0, 1, 2, 4, 4, 8 };
+static const size_t sizes[] = { 0, 1, 2, 4, 4, 8 };
 
 class TypeInfo
 {
@@ -25,7 +25,7 @@ public:
 
   TypeId getId() const;
   const char* name() const;
-  int size() const;
+  size_t size() const;
 
 private:
   TypeId id;
@@ -46,7 +46,7 @@ inline const char* TypeInfo::name() const
   return names[id];
 }
 
-inline int TypeInfo::size() const
+inline size_t TypeInfo::size() const
 {
   return sizes[id];
 }

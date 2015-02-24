@@ -8,22 +8,22 @@ public:
   Image3D();
   ~Image3D();
 
-  void setDimension(int xdim, int ydim, int zdim);
+  void setDimension(unsigned xdim, unsigned ydim, unsigned zdim);
   void setSpacing(T xspc, T yspc, T zspc);
   void setOrigin(T x, T y, T z);
 
   void allocate();
   T *getData();
 
-  const int* getDimension() const;
-  int getNumberOfPoints() const;
+  const unsigned* getDimension() const;
+  unsigned getNumberOfPoints() const;
   const T* getSpacing() const;
   const T* getOrigin() const;
   const T* getData() const;
 
 private:
-  int dim[3];
-  int npoints;
+  unsigned dim[3];
+  unsigned npoints;
   T spacing[3];
   T origin[3];
   T *data;
@@ -45,7 +45,8 @@ inline Image3D<T>::~Image3D()
 }
 
 template <typename T>
-inline void Image3D<T>::setDimension(int xdim, int ydim, int zdim)
+inline void Image3D<T>::setDimension(unsigned xdim, unsigned ydim,
+                                     unsigned zdim)
 {
   this->dim[0] = xdim;
   this->dim[1] = ydim;
@@ -83,13 +84,13 @@ inline T* Image3D<T>::getData()
 }
 
 template <typename T>
-inline const int* Image3D<T>::getDimension() const
+inline const unsigned* Image3D<T>::getDimension() const
 {
   return this->dim;
 }
 
 template <typename T>
-inline int Image3D<T>::getNumberOfPoints() const
+inline unsigned Image3D<T>::getNumberOfPoints() const
 {
   return this->npoints;
 }

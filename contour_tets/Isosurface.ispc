@@ -1,5 +1,7 @@
 #include "type.h"
 
+typedef unsigned int uint;
+
 enum CONSTANTS
 {
   GANG_SIZE = programCount,
@@ -8,9 +10,9 @@ enum CONSTANTS
 
 struct TetInfo_soa
 {
-  int tetIdx[GANG_SIZE];
+  uint tetIdx[GANG_SIZE];
   int caseId[GANG_SIZE];
-  int ptidx[4][GANG_SIZE];
+  uint ptidx[4][GANG_SIZE];
   Float_t val[4][GANG_SIZE];
   Float_t pts[4][3][GANG_SIZE];
 };
@@ -36,18 +38,18 @@ inline void computeTriangleNormal(varying const Float_t verts[3][3],
 }
 
 export void extractIsosurface_impl(uniform const TetInfo_soa tetinfo[],
-                                   uniform int ntets,
+                                   uniform uint ntets,
                                    uniform Float_t isoval,
                                    uniform const int triangleEdges[],
                                    uniform const int edgeVertices[],
                                    uniform Float_t vertices[],
-                                   uniform int vertKeys[],
+                                   uniform uint vertKeys[],
                                    uniform Float_t normals[])
 {
-  uniform int triInd = 0;
+  uniform uint triInd = 0;
   foreach (i = 0 ... ntets)
     {
-    uniform int gang = extract(i, 0)/GANG_SIZE;
+    uniform uint gang = extract(i, 0)/GANG_SIZE;
 
     int caseId = tetinfo[gang].caseId[programIndex];
     foreach_unique(u_caseId in caseId)
@@ -57,7 +59,7 @@ export void extractIsosurface_impl(uniform const TetInfo_soa tetinfo[],
       for (; *triEdges != -1; triEdges += 3)
         {
         Float_t verts[3][3];
-        int keys[3][2];
+        uint keys[3][2];
         for (uniform int e = 0; e < 3; ++e)
           {
           uniform int v1 = edgeVertices[triEdges[e] * 2 + 0];
@@ -97,10 +99,10 @@ export void extractIsosurface_impl(uniform const TetInfo_soa tetinfo[],
 
         foreach_active (p)
           {
-          uniform int vind = triInd * 3 * 3;
-          uniform int kind = triInd * 3 * 2;
-          uniform int nind = ((triInd/GANG_SIZE) * GANG_SIZE * 3) +
-                             (triInd % GANG_SIZE);
+          uniform uint vind = triInd * 3 * 3;
+          uniform uint kind = triInd * 3 * 2;
+          uniform uint nind = ((triInd/GANG_SIZE) * GANG_SIZE * 3) +
+                              (triInd % GANG_SIZE);
           for (uniform int ii = 0; ii < 3; ++ii)
             {
             vertices[vind++] = extract(verts[ii][0], p);
@@ -118,12 +120,12 @@ export void extractIsosurface_impl(uniform const TetInfo_soa tetinfo[],
     }
 }
 
-export void normalizeNormals(uniform Float_t normals[], uniform int count)
+export void normalizeNormals(uniform Float_t normals[], uniform uint count)
 {
   foreach (i = 0 ... count)
     {
-    uniform int gang = extract(i, 0)/GANG_SIZE;
-    uniform int sind = gang * GANG_SIZE * 3;
+    uniform uint gang = extract(i, 0)/GANG_SIZE;
+    uniform uint sind = gang * GANG_SIZE * 3;
 
     Float_t norm[3];
     for (uniform int ii = 0; ii < 3; ++ii)
@@ -140,10 +142,10 @@ export void normalizeNormals(uniform Float_t normals[], uniform int count)
       norm[2] /= mag;
       }
 
-    int dind = i * 3;
+    uint dind = i * 3;
     foreach_active (p)
       {
-      uniform int u_dind = extract(dind, p);
+      uniform uint u_dind = extract(dind, p);
       normals[u_dind + 0] = extract(norm[0], p);
       normals[u_dind + 1] = extract(norm[1], p);
       normals[u_dind + 2] = extract(norm[2], p);
@@ -154,14 +156,14 @@ export void normalizeNormals(uniform Float_t normals[], uniform int count)
 
 extern "C" void addTriangleToOutput(void* uniform trimeshHandle,
                                     uniform Float_t verts[3][3],
-                                    uniform int keys[3][2],
+                                    uniform uint keys[3][2],
                                     uniform Float_t normal[3]);
 
 export void extractIosurface_impl_v2(uniform const Float_t tetPoints[],
                                      uniform const Float_t tetScalars[],
-                                     uniform const int tetIndexes[],
-                                     uniform int numTetPoints,
-                                     uniform int numTetCells,
+                                     uniform const uint tetIndexes[],
+                                     uniform uint numTetPoints,
+                                     uniform uint numTetCells,
                                      uniform Float_t isoval,
                                      uniform const int triangleEdges[],
                                      uniform const int edgeVertices[],
@@ -171,7 +173,7 @@ export void extractIosurface_impl_v2(uniform const Float_t tetPoints[],
 
   foreach (i = 0 ... numTetCells)
     {
-    int ptinds[4];
+    uint ptinds[4];
     Float_t val[4];
     int caseId = 0;
     for (uniform int ii = 0; ii < 4; ++ii)
@@ -189,7 +191,7 @@ export void extractIosurface_impl_v2(uniform const Float_t tetPoints[],
       {
       Float_t verts[3][3];
       Float_t normal[3];
-      int keys[3][2];
+      uint keys[3][2];
 
       for (uniform int e = 0; e < 3; ++e)
         {
@@ -225,7 +227,7 @@ export void extractIosurface_impl_v2(uniform const Float_t tetPoints[],
       foreach_active (p)
         {
         uniform Float_t v[3][3];
-        uniform int k[3][2];
+        uniform uint k[3][2];
         uniform Float_t n[3];
         for (uniform int ii = 0; ii < 3; ++ii)
           {

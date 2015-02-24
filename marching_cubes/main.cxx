@@ -14,7 +14,7 @@
 
 typedef boost::chrono::steady_clock Clock;
 
-static const char * impstr[] = { "scalar", "shortvec", "simd", "omp_scalar", 
+static const char * impstr[] = { "scalar", "shortvec", "simd", "omp_scalar",
                                  "scalar_2", "simd_2", "scalar_2.1",
                                  "simd_2.1" };
 
@@ -69,7 +69,13 @@ int main(int argc, char* argv[])
     std::cout << "Invalid implementation" << std::endl;
     }
 
-  //tbb::task_scheduler_init init(1);
+  tbb::task_scheduler_init tbbInit(tbb::task_scheduler_init::deferred);
+  const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
+  if (omp_num_threads_str)
+    {
+    int nthreads = boost::lexical_cast<Float_t>(omp_num_threads_str);
+    tbbInit.initialize(nthreads);
+    }
 
   Image3D_t volume;
   loadImage3D(argv[1], &volume);

@@ -259,7 +259,7 @@ const int MarchingCubesTables::caseTrianglesEdges[256][16] = {
 {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1} /* 255 0 */
 };
 
-const int MarchingCubesTables::numberOfTriangles[256] = {
+const unsigned MarchingCubesTables::numberOfTriangles[256] = {
 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 2,
 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 3,
 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 3,

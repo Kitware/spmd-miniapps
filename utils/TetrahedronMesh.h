@@ -9,14 +9,14 @@ struct TetrahedronMesh
 public:
   std::vector<T> points;
   std::vector<T> values;
-  std::vector<int> indexes;
+  std::vector<unsigned> indexes;
 
-  int numberOfPoints() const
+  unsigned numberOfPoints() const
   {
     return this->values.size();
   }
 
-  int numberOfTetrahedra() const
+  unsigned numberOfTetrahedra() const
   {
     return this->indexes.size()/4;
   }

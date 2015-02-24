@@ -6,12 +6,12 @@ class MarchingCubesTables
 public:
   static const int* getEdgeVertices(int edgeId);
   static const int* getCaseTrianglesEdges(int caseId);
-  static int getNumberOfTriangles(int caseId);
+  static unsigned getNumberOfTriangles(int caseId);
 
 private:
   static const int edgeVertices[12][2];
   static const int caseTrianglesEdges[256][16];
-  static const int numberOfTriangles[256];
+  static const unsigned numberOfTriangles[256];
 };
 
 inline const int* MarchingCubesTables::getEdgeVertices(int edgeId)
@@ -24,7 +24,7 @@ inline const int* MarchingCubesTables::getCaseTrianglesEdges(int caseId)
   return caseTrianglesEdges[caseId];
 }
 
-inline int MarchingCubesTables::getNumberOfTriangles(int caseId)
+inline unsigned MarchingCubesTables::getNumberOfTriangles(int caseId)
 {
   return numberOfTriangles[caseId];
 }

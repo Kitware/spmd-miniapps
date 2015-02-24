@@ -39,7 +39,7 @@ if (MIC_BUILD)
   ispc_generate_cxx (ISPC_SRCS
     ${MARCHING_CUBES_ISPC_GANG_SIZE}
     "knc-i1x${MARCHING_CUBES_ISPC_GANG_SIZE}.h"
-    "-I${CMAKE_CURRENT_BINARY_DIR}"
+    "-I${CMAKE_CURRENT_BINARY_DIR} --addressing=64"
     ${ISPC_SOURCE_FILES}
   )
   include_directories("${ISPC_ROOT}/examples/intrinsics")
@@ -51,7 +51,7 @@ else ()
   )
 
   ispc_compile (ISPC_OBJS ISPC_SRCS
-    "--target=${ISPC_TARGET} -I${CMAKE_CURRENT_BINARY_DIR}"
+    "--target=${ISPC_TARGET} -I${CMAKE_CURRENT_BINARY_DIR} --addressing=64"
     ${ISPC_SOURCE_FILES}
   )
 endif (MIC_BUILD)

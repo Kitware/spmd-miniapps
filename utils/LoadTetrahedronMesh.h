@@ -84,15 +84,15 @@ void loadTetrahedronMesh(const char *vtkFileName, TetrahedronMesh<T> *tetmesh)
     }
 
   std::vector<char> rbuf;
-  int buffsize;
+  size_t buffsize;
 
   std::vector<T> points, values;
-  std::vector<int> indexes;
+  std::vector<unsigned> indexes;
 
 
   reader.readline();
   std::string type;
-  int npoints;
+  unsigned npoints;
   reader.stream() >> tag >> npoints >> type;
   if (tag != "POINTS" || reader.stream().bad())
     {
@@ -114,7 +114,7 @@ void loadTetrahedronMesh(const char *vtkFileName, TetrahedronMesh<T> *tetmesh)
 
 
   reader.readline();
-  int ncells, nints;
+  unsigned ncells, nints;
   reader.stream() >> tag >> ncells >> nints;
   if (tag != "CELLS" || reader.stream().bad())
     {
@@ -129,8 +129,8 @@ void loadTetrahedronMesh(const char *vtkFileName, TetrahedronMesh<T> *tetmesh)
   indexes.resize(nints);
   convertBufferWithTypeInfo(&rbuf[0], createTypeInfo(TypeInfo::ID_INT), nints,
                             &indexes[0]);
-  int ninds = 0;
-  for (int i = 0; i < nints; i += 5)
+  unsigned ninds = 0;
+  for (unsigned i = 0; i < nints; i += 5)
     {
     if (indexes[i] != 4)
       {
@@ -150,7 +150,7 @@ void loadTetrahedronMesh(const char *vtkFileName, TetrahedronMesh<T> *tetmesh)
     {
     throw bad_format("Expecting CELL_TYPES <ncells>");
     }
-  buffsize = ncells * sizeof(int);
+  buffsize = ncells * sizeof(unsigned);
   stream.seekg(buffsize, std::istream::cur); // assumes all are tetrahedra
   stream >> std::ws;
 

@@ -24,17 +24,17 @@ template <typename T, typename PointHandle, typename GetPointPositionType =
 class PointLocator3D
 {
 public:
-  PointLocator3D(T range[6], int xdivs, int ydivs, int zdivs);
+  PointLocator3D(T range[6], unsigned xdivs, unsigned ydivs, unsigned zdivs);
 
   PointHandle* insert(const PointHandle &point, bool *exists,
     GetPointPositionType getPosition = GetPointPositionType());
 
-  int numberOfPoints() const;
+  unsigned numberOfPoints() const;
   void dumpStats() const;
 
 private:
-  int xdivs, ydivs, zdivs;
-  int xydivs, npoints;
+  unsigned xdivs, ydivs, zdivs;
+  unsigned xydivs, npoints;
   T range[6];
 
   typedef std::vector<PointHandle> Bin;
@@ -43,18 +43,24 @@ private:
 
 template <typename T, typename PointHandle, typename GetPointPositionType>
 inline PointLocator3D<T, PointHandle, GetPointPositionType>::
-PointLocator3D(T range[6], int xdivs, int ydivs, int zdivs)
+PointLocator3D(T range[6], unsigned xdivs, unsigned ydivs, unsigned zdivs)
   : npoints(0)
 {
-  this->xdivs = std::max(1, xdivs);
-  this->ydivs = std::max(1, ydivs);
-  this->zdivs = std::max(1, zdivs);
+  this->xdivs = std::max(1u, xdivs);
+  this->ydivs = std::max(1u, ydivs);
+  this->zdivs = std::max(1u, zdivs);
   this->xydivs = this->xdivs * this->ydivs;
 
   std::copy(range, range + 6, this->range);
 
-  int nbins = this->xydivs * this->zdivs;
+  unsigned nbins = this->xydivs * this->zdivs;
   this->bins.resize(nbins);
+}
+
+template <typename T>
+inline T clampValue(const T &minVal, const T &maxVal, const T& val)
+{
+  return std::min(maxVal, std::max(minVal, val));
 }
 
 template <typename T, typename PointHandle, typename GetPointPositionType>
@@ -62,35 +68,28 @@ PointHandle* PointLocator3D<T, PointHandle, GetPointPositionType>::
 insert(const PointHandle &point, bool *exists,
        GetPointPositionType getPosition)
 {
+  const T e = 1e-9;
   const T *pval = getPosition(point);
 
-  assert(pval[0] >= this->range[0] && pval[0] <= this->range[1] &&
-         pval[1] >= this->range[2] && pval[1] <= this->range[3] &&
-         pval[2] >= this->range[4] && pval[2] <= this->range[5]);
+  assert(pval[0] >= this->range[0] - e && pval[0] <= this->range[1] + e &&
+         pval[1] >= this->range[2] - e && pval[1] <= this->range[3] + e &&
+         pval[2] >= this->range[4] - e && pval[2] <= this->range[5] + e);
 
-  int binIdx[3];
+  unsigned binIdx[3];
   binIdx[0] = ((pval[0] - this->range[0])/(this->range[1] - this->range[0])) *
               static_cast<T>(this->xdivs);
-  if (binIdx[0] == this->xdivs)
-    {
-    --binIdx[0];
-    }
+  binIdx[0] = clampValue(0u, xdivs - 1, binIdx[0]);
 
   binIdx[1] = ((pval[1] - this->range[2])/(this->range[3] - this->range[2])) *
               static_cast<T>(this->ydivs);
-  if (binIdx[1] == this->ydivs)
-    {
-    --binIdx[1];
-    }
+  binIdx[1] = clampValue(0u, ydivs - 1, binIdx[1]);
 
   binIdx[2] = ((pval[2] - this->range[4])/(this->range[5] - this->range[4])) *
               static_cast<T>(this->zdivs);
-  if (binIdx[2] == this->zdivs)
-    {
-    --binIdx[2];
-    }
+  binIdx[2] = clampValue(0u, zdivs - 1, binIdx[2]);
 
-  int idx = binIdx[0] + (binIdx[1] * this->xdivs) + (binIdx[2] * this->xydivs);
+  unsigned idx = binIdx[0] + (binIdx[1] * this->xdivs) +
+                 (binIdx[2] * this->xydivs);
   Bin &thisBin = this->bins[idx];
 
   PointHandle *ret = 0;
@@ -118,31 +117,31 @@ insert(const PointHandle &point, bool *exists,
 }
 
 template <typename T, typename PointHandle, typename GetPointPositionType>
-inline int PointLocator3D<T, PointHandle, GetPointPositionType>::
+inline unsigned PointLocator3D<T, PointHandle, GetPointPositionType>::
 numberOfPoints() const
 {
   return this->npoints;
 }
 
-const int NBUCKETS = 50;
+const unsigned NBUCKETS = 50;
 
 template <typename T, typename PointHandle, typename GetPointPositionType>
 void PointLocator3D<T, PointHandle, GetPointPositionType>::dumpStats() const
 {
-  int maxPoints = 0, nempty = 0;
-  for (int i = 0; i <  bins.size(); ++i)
+  unsigned maxPoints = 0, nempty = 0;
+  for (unsigned i = 0; i <  bins.size(); ++i)
     {
-      maxPoints = std::max(maxPoints, static_cast<int>(bins[i].size()));
+      maxPoints = std::max(maxPoints, static_cast<unsigned>(bins[i].size()));
     }
 
-  int bucketSize = ((maxPoints + NBUCKETS - 1)/NBUCKETS);
-  int buckets[NBUCKETS];
+  unsigned bucketSize = ((maxPoints + NBUCKETS - 1)/NBUCKETS);
+  unsigned buckets[NBUCKETS];
 
   std::fill(buckets, buckets + NBUCKETS, 0);
 
-  for (int i = 0; i < bins.size(); ++i)
+  for (unsigned i = 0; i < bins.size(); ++i)
     {
-    int binsize = bins[i].size();
+    unsigned binsize = bins[i].size();
     if (!binsize)
       {
       ++nempty;
@@ -155,7 +154,7 @@ void PointLocator3D<T, PointHandle, GetPointPositionType>::dumpStats() const
 
   std::cout << "Maximum bin size: " << maxPoints << "\n";
   std::cout << "Number of empty bins: " << nempty << "\n";
-  for (int i = 0, j = 1; i < NBUCKETS; ++i, j += bucketSize)
+  for (unsigned i = 0, j = 1; i < NBUCKETS; ++i, j += bucketSize)
     {
     std::cout << "(" << j << "-" << j + bucketSize - 1 << "): "
               << buckets[i] << "\n";

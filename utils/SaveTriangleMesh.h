@@ -18,11 +18,11 @@ void saveTriangleMesh(const TriangleMesh<T> &mesh, const char *vtkFileName)
   std::ofstream stream;
   stream.open(vtkFileName);
 
-  int nverts = mesh.points.size()/3;
-  int ntriangles = mesh.indexes.size()/3;
+  unsigned nverts = mesh.points.size()/3;
+  unsigned ntriangles = mesh.indexes.size()/3;
   TypeInfo ti = createTypeInfo<T>();
 
-  int bufsize = 0;
+  size_t bufsize = 0;
   std::vector<char> wbuff;
 
   stream << "# vtk DataFile Version 3.0" << std::endl;
@@ -32,18 +32,18 @@ void saveTriangleMesh(const TriangleMesh<T> &mesh, const char *vtkFileName)
 
   bufsize = mesh.points.size() * sizeof(T);
   wbuff.resize(bufsize);
-  convertBuffer(&mesh.points[0], mesh.points.size(), 
+  convertBuffer(&mesh.points[0], mesh.points.size(),
                 reinterpret_cast<T*>(&wbuff[0]));
 
   stream << "POINTS " << nverts << " " << ti.name() << std::endl;
   stream.write(&wbuff[0], wbuff.size());
   stream << std::endl;
 
-  bufsize = ntriangles * 4 * sizeof(int);
+  bufsize = ntriangles * 4 * sizeof(unsigned);
   wbuff.resize(bufsize);
-  int *ind = reinterpret_cast<int*>(&wbuff[0]);
-  const int *src = &mesh.indexes[0];
-  for (int i = 0; i < ntriangles; ++i)
+  unsigned *ind = reinterpret_cast<unsigned*>(&wbuff[0]);
+  const unsigned *src = &mesh.indexes[0];
+  for (unsigned i = 0; i < ntriangles; ++i)
     {
     *ind = 3;
     flipEndianness(*ind++);

@@ -9,8 +9,11 @@
 #include <iostream>
 #include <vector>
 
+static const unsigned grainDim = 32;
+static const unsigned INVALID_EDGE = ~0u;
 
-inline void generateEdgeIdOffsets(int xdim, int xydim, int offsets[12])
+inline void generateEdgeIdOffsets(unsigned xdim, unsigned xydim,
+                                  unsigned offsets[12])
 {
   offsets[0] = 0;
   offsets[1] = 4;
@@ -26,7 +29,7 @@ inline void generateEdgeIdOffsets(int xdim, int xydim, int offsets[12])
   offsets[11] = (3 * (xdim + 1)) + 2;
 }
 
-static void computePosition(const int idx[3], const Float_t origin[3],
+static void computePosition(const unsigned idx[3], const Float_t origin[3],
                             const Float_t spacing[3], Float_t pos[3])
 {
   pos[0] = origin[0] + (static_cast<Float_t>(idx[0]) * spacing[0]);
@@ -34,11 +37,11 @@ static void computePosition(const int idx[3], const Float_t origin[3],
   pos[2] = origin[2] + (static_cast<Float_t>(idx[2]) * spacing[2]);
 }
 
-static void computeGradient(const int idx[3], const Float_t *buffer,
-                            const int dims[3], const Float_t spacing[3],
+static void computeGradient(const unsigned idx[3], const Float_t *buffer,
+                            const unsigned dims[3], const Float_t spacing[3],
                             Float_t grad[3])
 {
-  int flatIdx = idx[0] + (idx[1] * dims[0]) + (idx[2] * dims[0] * dims[1]);
+  unsigned flatIdx = idx[0] + (idx[1] * dims[0]) + (idx[2] * dims[0] * dims[1]);
   Float_t v1, v2, fac;
 
   v1 = (idx[0] > 0) ? buffer[flatIdx - 1] : buffer[flatIdx];
@@ -69,7 +72,7 @@ namespace scalar_2 {
 
 struct CellInfo
 {
-  int idx[3];
+  unsigned idx[3];
   int caseId;
 };
 
@@ -93,8 +96,8 @@ public:
 
 struct EdgeInfo
 {
-  int edgeId, pos;
-  int idx[4];
+  unsigned edgeId, pos;
+  unsigned idx[4];
 };
 
 class EdgeIsInvalid
@@ -102,7 +105,7 @@ class EdgeIsInvalid
 public:
   bool operator()(const EdgeInfo &e) const
   {
-    return (e.edgeId == -1);
+    return (e.edgeId == INVALID_EDGE);
   }
 };
 
@@ -115,38 +118,38 @@ public:
   }
 };
 
-void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
   Float_t isoval, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
-                                       { 1, 1, 0}, { 0, 1, 0},
-                                       { 0, 0, 1}, { 1, 0, 1},
-                                       { 1, 1, 1}, { 0, 1, 1} };
+  static const unsigned idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
+                                            { 1, 1, 0}, { 0, 1, 0},
+                                            { 0, 0, 1}, { 1, 0, 1},
+                                            { 1, 1, 1}, { 0, 1, 1} };
 
-  const int *dims = vol.getDimension();
+  const unsigned *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
   const Float_t *buffer = vol.getData();
-  int xydim = dims[0] * dims[1];
+  unsigned xydim = dims[0] * dims[1];
 
-  int edgeIdOffsets[12];
+  unsigned edgeIdOffsets[12];
   generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
   // part 1: compute caseId of each cell
-  int ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
-               (ext[5] - ext[4] + 1);
+  unsigned ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
+                    (ext[5] - ext[4] + 1);
   std::vector<CellInfo> cellInfo;
   cellInfo.reserve(ncells);
 
-  for (int zidx = ext[4]; zidx <= ext[5]; ++zidx)
+  for (unsigned zidx = ext[4]; zidx <= ext[5]; ++zidx)
     {
-    for (int yidx = ext[2]; yidx <= ext[3]; ++yidx)
+    for (unsigned yidx = ext[2]; yidx <= ext[3]; ++yidx)
       {
-      for (int xidx = ext[0]; xidx <= ext[1]; ++xidx)
+      for (unsigned xidx = ext[0]; xidx <= ext[1]; ++xidx)
         {
         Float_t val[8];
-        int idx = xidx + (yidx * dims[0]) + (zidx * xydim);
+        unsigned idx = xidx + (yidx * dims[0]) + (zidx * xydim);
 
         val[0] = buffer[idx];
         val[1] = buffer[idx + 1];
@@ -178,13 +181,13 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   // part 3: generate edges
   ncells = cellInfo.size();
   std::vector<EdgeInfo> edgeInfo(ncells * 15);
-  for (int i = 0, pos = 0; i < ncells; ++i)
+  for (unsigned i = 0, pos = 0; i < ncells; ++i)
     {
-    int idx = i * 15;
+    unsigned idx = i * 15;
 
     const CellInfo &ci = cellInfo[i];
-    int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
-                   3;
+    unsigned baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) +
+                        (ci.idx[2] * xydim)) * 3;
 
     const int *edgeIds = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
@@ -192,7 +195,7 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
       EdgeInfo &ei = edgeInfo[idx];
       if (*edgeIds == -1)
         {
-        ei.edgeId = -1;
+        ei.edgeId = INVALID_EDGE;
         }
       else
         {
@@ -215,9 +218,9 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
 
   // part 5: merge duplicate edges, generate indexes
-  std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0, ptsIdxOffset = mesh->points.size()/3;
-  for (size_t i = 0; i < edgeInfo.size(); ++i)
+  std::vector<unsigned> indexes(edgeInfo.size());
+  unsigned last = 0, ptsIdxOffset = mesh->points.size()/3;
+  for (unsigned i = 0; i < edgeInfo.size(); ++i)
     {
     if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
       {
@@ -233,11 +236,11 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   mesh->indexes.insert(mesh->indexes.end(), indexes.begin(), indexes.end());
 
   // part 6: compute gradients and generate vertices
-  for (size_t i = 0;  i < edgeInfo.size(); ++i)
+  for (unsigned i = 0;  i < edgeInfo.size(); ++i)
     {
     const EdgeInfo &ei = edgeInfo[i];
 
-    int p1idx[3], p2idx[3];
+    unsigned p1idx[3], p2idx[3];
     int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
     int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[1];
     p1idx[0] = ei.idx[0] + idxOffset[p1][0];
@@ -247,8 +250,8 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
     p2idx[1] = ei.idx[1] + idxOffset[p2][1];
     p2idx[2] = ei.idx[2] + idxOffset[p2][2];
 
-    int p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
-    int p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
+    unsigned p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
+    unsigned p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
     Float_t w = (isoval - buffer[p1FlatIdx]) /
                (buffer[p2FlatIdx] - buffer[p1FlatIdx]);
 
@@ -270,7 +273,7 @@ class IsosurfaceFunctor
 {
 public:
   typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
-  typedef tbb::blocked_range3d<int, int, int> Range_t;
+  typedef tbb::blocked_range3d<unsigned, unsigned, unsigned> Range_t;
 
   IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
     : input(vol), isoval(isoval), meshPieces(meshPieces)
@@ -279,9 +282,9 @@ public:
 
   void operator()(const Range_t &range) const
   {
-    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
-                      range.rows().begin(), range.rows().end() - 1,
-                      range.pages().begin(), range.pages().end() - 1 };
+    unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                           range.rows().begin(), range.rows().end() - 1,
+                           range.pages().begin(), range.pages().end() - 1 };
     TriangleMesh_t &meshPiece = this->meshPieces.local();
     extractIsosurfaceFromBlock(this->input, extent, this->isoval, &meshPiece);
   }
@@ -295,13 +298,14 @@ private:
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
-  const int *dims = vol.getDimension();
+  const unsigned *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
 
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
-                                       0, dims[0] - 1, 64);
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim,
+                                       0, dims[1] - 1, grainDim,
+                                       0, dims[0] - 1, grainDim);
 
   IsosurfaceFunctor func(vol, isoval, meshPieces);
   tbb::parallel_for(cellRange, func);
@@ -314,7 +318,7 @@ namespace simd_2 {
 
 struct CellInfo
 {
-  int idx[3];
+  unsigned idx[3];
   int caseId;
 };
 
@@ -338,8 +342,8 @@ public:
 
 struct EdgeInfo
 {
-  int edgeId, pos;
-  int idx[4];
+  unsigned edgeId, pos;
+  unsigned idx[4];
 };
 
 class EdgeIsInvalid
@@ -347,7 +351,7 @@ class EdgeIsInvalid
 public:
   bool operator()(const EdgeInfo &e) const
   {
-    return (e.edgeId == -1);
+    return (e.edgeId == INVALID_EDGE);
   }
 };
 
@@ -360,36 +364,36 @@ public:
   }
 };
 
-void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
+void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
   Float_t isoval, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
-  static const int idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
-                                       { 1, 1, 0}, { 0, 1, 0},
-                                       { 0, 0, 1}, { 1, 0, 1},
-                                       { 1, 1, 1}, { 0, 1, 1} };
+  static const unsigned idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
+                                            { 1, 1, 0}, { 0, 1, 0},
+                                            { 0, 0, 1}, { 1, 0, 1},
+                                            { 1, 1, 1}, { 0, 1, 1} };
 
-  const int *dims = vol.getDimension();
+  const unsigned *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
   const Float_t *buffer = vol.getData();
-  int xydim = dims[0] * dims[1];
+  unsigned xydim = dims[0] * dims[1];
 
-  int edgeIdOffsets[12];
+  unsigned edgeIdOffsets[12];
   generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
 
   // part 1: compute caseId of each cell
-  int ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
-               (ext[5] - ext[4] + 1);
+  unsigned ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
+                    (ext[5] - ext[4] + 1);
   std::vector<int> caseIds(ncells);
   ispc::getCellCaseIds(buffer, dims, ext, isoval, &caseIds[0]);
 
   std::vector<CellInfo> cellInfo(ncells);
-  for (int z = ext[4], i = 0; z <= ext[5]; ++z)
+  for (unsigned z = ext[4], i = 0; z <= ext[5]; ++z)
     {
-    for (int y = ext[2]; y <= ext[3]; ++y)
+    for (unsigned y = ext[2]; y <= ext[3]; ++y)
       {
-      for (int x = ext[0]; x <= ext[1]; ++x, ++i)
+      for (unsigned x = ext[0]; x <= ext[1]; ++x, ++i)
         {
         cellInfo[i].idx[0] = x;
         cellInfo[i].idx[1] = y;
@@ -408,13 +412,13 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   // part 3: generate edges
   ncells = cellInfo.size();
   std::vector<EdgeInfo> edgeInfo(ncells * 15);
-  for (int i = 0, pos = 0; i < ncells; ++i)
+  for (unsigned i = 0, pos = 0; i < ncells; ++i)
     {
-    int idx = i * 15;
+    unsigned idx = i * 15;
 
     const CellInfo &ci = cellInfo[i];
-    int baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) + (ci.idx[2] * xydim)) *
-                   3;
+    unsigned baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) +
+                        (ci.idx[2] * xydim)) * 3;
 
     const int *edgeIds = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     for (int j = 0; j < 15; ++j, ++idx, ++edgeIds)
@@ -422,7 +426,7 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
       EdgeInfo &ei = edgeInfo[idx];
       if (*edgeIds == -1)
         {
-        ei.edgeId = -1;
+        ei.edgeId = INVALID_EDGE;
         }
       else
         {
@@ -445,9 +449,9 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   std::sort(edgeInfo.begin(), edgeInfo.end(), EdgeIdIsLess());
 
   // part 5: merge duplicate edges, generate indexes
-  std::vector<int> indexes(edgeInfo.size());
-  size_t last = 0, ptsIdxOffset = mesh->points.size()/3;
-  for (size_t i = 0; i < edgeInfo.size(); ++i)
+  std::vector<unsigned> indexes(edgeInfo.size());
+  unsigned last = 0, ptsIdxOffset = mesh->points.size()/3;
+  for (unsigned i = 0; i < edgeInfo.size(); ++i)
     {
     if (edgeInfo[i].edgeId != edgeInfo[last].edgeId)
       {
@@ -463,11 +467,11 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
   mesh->indexes.insert(mesh->indexes.end(), indexes.begin(), indexes.end());
 
   // part 6: compute gradients and generate vertices
-  for (size_t i = 0;  i < edgeInfo.size(); ++i)
+  for (unsigned i = 0;  i < edgeInfo.size(); ++i)
     {
     const EdgeInfo &ei = edgeInfo[i];
 
-    int p1idx[3], p2idx[3];
+    unsigned p1idx[3], p2idx[3];
     int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
     int p2 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[1];
     p1idx[0] = ei.idx[0] + idxOffset[p1][0];
@@ -477,8 +481,8 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const int ext[6],
     p2idx[1] = ei.idx[1] + idxOffset[p2][1];
     p2idx[2] = ei.idx[2] + idxOffset[p2][2];
 
-    int p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
-    int p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
+    unsigned p1FlatIdx = p1idx[0] + (p1idx[1] * dims[0]) + (p1idx[2] * xydim);
+    unsigned p2FlatIdx = p2idx[0] + (p2idx[1] * dims[0]) + (p2idx[2] * xydim);
     Float_t w = (isoval - buffer[p1FlatIdx]) /
                (buffer[p2FlatIdx] - buffer[p1FlatIdx]);
 
@@ -500,7 +504,7 @@ class IsosurfaceFunctor
 {
 public:
   typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
-  typedef tbb::blocked_range3d<int, int, int> Range_t;
+  typedef tbb::blocked_range3d<unsigned, unsigned, unsigned> Range_t;
 
   IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
     : input(vol), isoval(isoval), meshPieces(meshPieces)
@@ -509,9 +513,9 @@ public:
 
   void operator()(const Range_t &range) const
   {
-    int extent[6] = { range.cols().begin(), range.cols().end() - 1,
-                      range.rows().begin(), range.rows().end() - 1,
-                      range.pages().begin(), range.pages().end() - 1 };
+    unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
+                           range.rows().begin(), range.rows().end() - 1,
+                           range.pages().begin(), range.pages().end() - 1 };
     TriangleMesh_t &meshPiece = this->meshPieces.local();
     extractIsosurfaceFromBlock(this->input, extent, this->isoval, &meshPiece);
   }
@@ -525,13 +529,14 @@ private:
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                        TriangleMesh_t *mesh)
 {
-  const int *dims = vol.getDimension();
+  const unsigned *dims = vol.getDimension();
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
 
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, 64, 0, dims[1] - 1, 64,
-                                       0, dims[0] - 1, 64);
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim,
+                                       0, dims[1] - 1, grainDim,
+                                       0, dims[0] - 1, grainDim);
 
   IsosurfaceFunctor func(vol, isoval, meshPieces);
   tbb::parallel_for(cellRange, func);

@@ -63,7 +63,13 @@ int main(int argc, char* argv[])
     return 1;
     }
 
-  //tbb::task_scheduler_init init(1);
+  tbb::task_scheduler_init tbbInit(tbb::task_scheduler_init::deferred);
+  const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
+  if (omp_num_threads_str)
+    {
+    int nthreads = boost::lexical_cast<Float_t>(omp_num_threads_str);
+    tbbInit.initialize(nthreads);
+    }
 
   TetrahedronMesh_t tetmesh;
   loadTetrahedronMesh(argv[1], &tetmesh);

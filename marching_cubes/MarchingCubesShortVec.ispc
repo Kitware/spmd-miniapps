@@ -1,13 +1,16 @@
 #include "type.h"
 
-export inline void computeGradient(uniform int xidx[], uniform int yidx[],
-                                   uniform int zidx[],
+typedef unsigned int uint;
+
+export inline void computeGradient(uniform uint xidx[],
+                                   uniform uint yidx[],
+                                   uniform uint zidx[],
                                    uniform const Float_t buffer[],
-                                   uniform const int dims[3],
+                                   uniform const uint dims[3],
                                    uniform const Float_t spacing[3],
                                    uniform Float_t grad[][3])
 {
-  uniform int xysize = dims[0] * dims[1];
+  uniform uint xysize = dims[0] * dims[1];
 
   foreach (i = 0 ... 8) {
     if (xidx[i] == 0)

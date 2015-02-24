@@ -17,9 +17,9 @@ inline void flipEndianness(T &val)
 }
 
 template <typename SrcT, typename DstT>
-void convertBuffer(const SrcT *in, int nelms, DstT *out)
+void convertBuffer(const SrcT *in, size_t nelms, DstT *out)
 {
-  for (int i = 0; i < nelms; ++i)
+  for (size_t i = 0; i < nelms; ++i)
     {
     SrcT val = *in++;
     flipEndianness(val);
@@ -28,8 +28,8 @@ void convertBuffer(const SrcT *in, int nelms, DstT *out)
 }
 
 template <typename T>
-void convertBufferWithTypeInfo(const char *in, const TypeInfo &ti, int nelms,
-                               T *out)
+void convertBufferWithTypeInfo(const char *in, const TypeInfo &ti,
+                               size_t nelms, T *out)
 {
   switch (ti.getId())
     {

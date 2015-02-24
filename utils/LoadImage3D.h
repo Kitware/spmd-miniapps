@@ -89,7 +89,7 @@ void loadImage3D(const char *vtkFileName, Image3D<T> *image)
     }
 
   int count = 3;
-  int xdim, ydim, zdim;
+  unsigned xdim, ydim, zdim;
   T spacing[3];
   T origin[3];
   while (count)
@@ -131,7 +131,7 @@ void loadImage3D(const char *vtkFileName, Image3D<T> *image)
     }
 
   reader.readline();
-  int npoints = 0;
+  unsigned npoints = 0;
   reader.stream() >> tag >> npoints;
   if (tag != "POINT_DATA" || reader.stream().bad())
     {
@@ -159,11 +159,11 @@ void loadImage3D(const char *vtkFileName, Image3D<T> *image)
     }
   if (name != "default")
     {
-    int size;
+    unsigned size;
     reader.stream() >> size;
     }
 
-  int bufsize = npoints * ti.size();
+  size_t bufsize = npoints * ti.size();
   std::vector<char> rbuf(bufsize);
   stream.read(&rbuf[0], bufsize);
 

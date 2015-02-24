@@ -1,23 +1,26 @@
 #include "type.h"
 
+typedef unsigned int uint;
+
 static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
 
-export uniform int getCellCases(uniform const Float_t buffer[],
-                                uniform const int dims[3],
-                                uniform const int cellExtent[6],
-                                uniform const int ncells[3],
-                                uniform Float_t isoval, uniform int cellCase[])
+export uniform uint getCellCases(uniform const Float_t buffer[],
+                                 uniform const uint dims[3],
+                                 uniform const uint cellExtent[6],
+                                 uniform const uint ncells[3],
+                                 uniform Float_t isoval,
+                                 uniform int cellCase[])
 {
-  uniform int ptxyCount = dims[0] * dims[1];
-  uniform int cellxyCount = ncells[0] * ncells[1];
+  uniform uint ptxyCount = dims[0] * dims[1];
+  uniform uint cellxyCount = ncells[0] * ncells[1];
 
-  int numberOfActiveCells = 0;
+  uint numberOfActiveCells = 0;
   foreach (zc = cellExtent[4] ... cellExtent[5] + 1,
            yc = cellExtent[2] ... cellExtent[3] + 1,
            xc = cellExtent[0] ... cellExtent[1] + 1)
     {
-    int ptIdx = zc * ptxyCount + yc * dims[0] + xc;
+    uint ptIdx = zc * ptxyCount + yc * dims[0] + xc;
 
     Float_t val[8];
     val[0] = buffer[ptIdx];
@@ -35,8 +38,9 @@ export uniform int getCellCases(uniform const Float_t buffer[],
       caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
       }
 
-    int cellIdx = ((zc - cellExtent[4]) * cellxyCount) +
-                  ((yc - cellExtent[2]) * ncells[0]) + (xc - cellExtent[0]);
+    uint cellIdx = ((zc - cellExtent[4]) * cellxyCount) +
+                   ((yc - cellExtent[2]) * ncells[0]) +
+                   (xc - cellExtent[0]);
     cellCase[cellIdx] = caseId;
 
     if (caseId != 0 && caseId != 255)
@@ -48,15 +52,15 @@ export uniform int getCellCases(uniform const Float_t buffer[],
   return reduce_add(numberOfActiveCells);
 }
 
-inline void computeGradient(varying int xidx, varying int yidx,
-                            varying int zidx,
+inline void computeGradient(varying uint xidx, varying uint yidx,
+                            varying uint zidx,
                             uniform const Float_t *buffer,
-                            uniform const int dims[3],
+                            uniform const uint dims[3],
                             uniform const Float_t spacing[3],
                             varying Float_t grad[3])
 {
-  uniform int ptxyCount = dims[0] * dims[1];
-  int ptIdx = xidx + (yidx * dims[0]) + (zidx * ptxyCount);
+  uniform uint ptxyCount = dims[0] * dims[1];
+  uint ptIdx = xidx + (yidx * dims[0]) + (zidx * ptxyCount);
 
   if (xidx == 0)
     {
@@ -122,36 +126,36 @@ inline Float_t lerp(varying Float_t a, varying Float_t b, varying Float_t w)
 }
 
 export void extractIsosurface_impl(uniform const Float_t buffer[],
-                                   uniform const int dims[3],
+                                   uniform const uint dims[3],
                                    uniform const Float_t origin[3],
                                    uniform const Float_t spacing[3],
                                    uniform Float_t isoval,
                                    uniform const int triangleCases[],
                                    uniform const int edgeVerts[],
-                                   uniform int numberOfCells,
-                                   uniform const int cellIndex[],
+                                   uniform uint numberOfCells,
+                                   uniform const uint cellIndex[],
                                    uniform const int caseIds[],
-                                   uniform const int vertIndex[],
+                                   uniform const uint vertIndex[],
                                    uniform Float_t points[],
                                    uniform Float_t normals[])
 {
-  uniform int ptxyCount = dims[0] * dims[1];
-  uniform const int idxOff[8] = { 0, 1, dims[0] + 1, dims[0], ptxyCount,
-                                  1 + ptxyCount, 1 + dims[0] + ptxyCount,
-                                  dims[0] + ptxyCount };
+  uniform uint ptxyCount = dims[0] * dims[1];
+  uniform const uint idxOff[8] = { 0, 1, dims[0] + 1, dims[0], ptxyCount,
+                                   1 + ptxyCount, 1 + dims[0] + ptxyCount,
+                                   dims[0] + ptxyCount };
 
-  uniform int ncells[3] = { dims[0] - 1, dims[1] - 1, dims[2] - 1 };
-  uniform int cellxyCount = ncells[0] * ncells[1];
+  uniform uint ncells[3] = { dims[0] - 1, dims[1] - 1, dims[2] - 1 };
+  uniform uint cellxyCount = ncells[0] * ncells[1];
 
   foreach (i = 0 ... numberOfCells)
     {
-    int cell = cellIndex[i];
+    uint cell = cellIndex[i];
 
-    int zc = cell/cellxyCount;
-    int yc = (cell%cellxyCount)/ncells[0];
-    int xc = (cell%cellxyCount)%ncells[0];
+    uint zc = cell/cellxyCount;
+    uint yc = (cell%cellxyCount)/ncells[0];
+    uint xc = (cell%cellxyCount)%ncells[0];
 
-    int ptIdx = zc * ptxyCount + yc * dims[0] + xc;
+    uint ptIdx = zc * ptxyCount + yc * dims[0] + xc;
 
     Float_t pos[8][3], grad[8][3];
 
@@ -197,7 +201,7 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
     computeGradient(xc, yc + 1, zc + 1, buffer, dims, spacing, grad[7]);
 
     const int *edges = triangleCases + (caseIds[i] * 16);
-    int vidx = vertIndex[i];
+    uint vidx = vertIndex[i];
     for (; *edges != -1; ++edges, vidx += 3)
       {
       int v1 = edgeVerts[*edges * 2 + 0], v2 = edgeVerts[*edges * 2 + 1];

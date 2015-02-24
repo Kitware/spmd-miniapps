@@ -11,13 +11,13 @@
 #include <cmath>
 #include <iostream>
 
-static const int grainSize = 64 * 1024;
+static const unsigned grainSize = 64 * 1024;
 
 struct EdgeKey
 {
-  int v1, v2;
+  unsigned v1, v2;
 
-  EdgeKey(int v1, int v2) : v1(v1), v2(v2) {}
+  EdgeKey(unsigned v1, unsigned v2) : v1(v1), v2(v2) {}
   bool operator==(const EdgeKey &e) const
   {
     return (v1 == e.v1) && (v2 == e.v2);
@@ -32,7 +32,7 @@ inline size_t hash_value(const EdgeKey &k)
   return seed;
 }
 
-typedef boost::unordered_map<EdgeKey, int> EdgeUnorderedMap;
+typedef boost::unordered_map<EdgeKey, unsigned> EdgeUnorderedMap;
 
 
 namespace scalar
@@ -85,15 +85,15 @@ inline void computeTetrahedronMeshBoundingBox(const TetrahedronMesh_t &tetmesh,
 
 
 void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
-  int from, int to, Float_t isoval, EdgeUnorderedMap &emap,
+  unsigned from, unsigned to, Float_t isoval, EdgeUnorderedMap &emap,
   TriangleMesh_t *trimesh)
 {
   static const int caseMask[4] = { 1, 2, 4, 8 };
 
-  int npts = trimesh->points.size()/3;
-  for (int i = from; i < to; ++i)
+  unsigned npts = trimesh->points.size()/3;
+  for (unsigned i = from; i < to; ++i)
     {
-    int ptinds[4];
+    unsigned ptinds[4];
     std::copy(tetmesh.indexes.begin() + (i * 4),
               tetmesh.indexes.begin() + (i * 4) + 4, ptinds);
 
@@ -116,7 +116,7 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
     for (; *triEdges != -1; triEdges += 3)
       {
       Float_t verts[3][3];
-      int vinds[3];
+      unsigned vinds[3];
       for (int e = 0; e < 3; ++e)
         {
         int v1 = MarchingTetsTables::getEdgeVertices(triEdges[e])[0];
@@ -170,7 +170,7 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
 class NormalizeFunctor
 {
 public:
-  typedef tbb::blocked_range<int> Range_t;
+  typedef tbb::blocked_range<unsigned> Range_t;
 
   NormalizeFunctor(std::vector<Float_t> *normals) : normals(normals)
   {
@@ -178,7 +178,7 @@ public:
 
   void operator()(const Range_t &range) const
   {
-    for (int i = range.begin(); i < range.end(); ++i)
+    for (unsigned i = range.begin(); i < range.end(); ++i)
       {
       normalize(&(this->normals->at(i * 3)));
       }
@@ -193,7 +193,7 @@ class IsosurfaceFunctor
 public:
   typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
   typedef tbb::enumerable_thread_specific<EdgeUnorderedMap> TLS_em;
-  typedef tbb::blocked_range<int> Range_t;
+  typedef tbb::blocked_range<unsigned> Range_t;
 
   IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     TLS_em &edgeMaps, TLS_tm &meshPieces)
@@ -246,7 +246,7 @@ void extractIsosurface(const TetrahedronMesh_t &tetmesh, Float_t isoval,
 namespace simd
 {
 
-const int GANG_SIZE = ISPC_GANG_SIZE;
+const unsigned GANG_SIZE = ISPC_GANG_SIZE;
 
 inline size_t getSOASize(size_t aos_size, size_t gangSize)
 {
@@ -260,7 +260,7 @@ inline size_t getNumberOfGangs(size_t aos_size, size_t gangSize)
 
 struct TetInfoA
 {
-  int tetIdx;
+  unsigned tetIdx;
   int caseId;
 };
 
@@ -275,7 +275,7 @@ public:
 
 struct TetInfoB
 {
-  int ptidx[4];
+  unsigned ptidx[4];
   Float_t val[4];
 };
 
@@ -284,14 +284,14 @@ struct TetInfoB
 using ispc::TetInfo_soa;
 
 void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
-  int from, int to, Float_t isoval, EdgeUnorderedMap &emap,
+  unsigned from, unsigned to, Float_t isoval, EdgeUnorderedMap &emap,
   TriangleMesh_t *trimesh)
 {
   static const int caseMask[4] = { 1, 2, 4, 8 };
 
   std::vector<TetInfoA> tetInfoA;
   std::vector<TetInfoB> tetInfoB;
-  for (int i = from, idx = 0; i < to; ++i)
+  for (unsigned i = from, idx = 0; i < to; ++i)
     {
     TetInfoA tiA;
     TetInfoB tiB;
@@ -319,11 +319,11 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
 
   std::sort(tetInfoA.begin(), tetInfoA.end(), CaseIdIsLess());
 
-  int numContributingTets = tetInfoA.size();
+  unsigned numContributingTets = tetInfoA.size();
   std::vector<TetInfo_soa> tetinfo_soa(getNumberOfGangs(numContributingTets,
                                                         GANG_SIZE));
-  int numTriangles = 0;
-  for (int i = 0, g = 0, gm = 0; i < numContributingTets; ++i, ++gm)
+  unsigned numTriangles = 0;
+  for (unsigned i = 0, g = 0, gm = 0; i < numContributingTets; ++i, ++gm)
     {
     if (gm == GANG_SIZE)
       {
@@ -331,11 +331,12 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
       gm = 0;
       }
 
-    int tetIdx = tetinfo_soa[g].tetIdx[gm] = tetInfoA[i].tetIdx;
+    unsigned tetIdx = tetinfo_soa[g].tetIdx[gm] = tetInfoA[i].tetIdx;
     int caseId = tetinfo_soa[g].caseId[gm] = tetInfoA[i].caseId;
     for (int ii = 0; ii < 4; ++ii)
       {
-      int ptidx = tetinfo_soa[g].ptidx[ii][gm] = tetInfoB[tetIdx].ptidx[ii];
+      unsigned ptidx = tetinfo_soa[g].ptidx[ii][gm]
+                     = tetInfoB[tetIdx].ptidx[ii];
       tetinfo_soa[g].val[ii][gm] = tetInfoB[tetIdx].val[ii];
 
       ptidx *= 3;
@@ -347,9 +348,9 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
     numTriangles += MarchingTetsTables::getNumberOfTriangles(caseId);
     }
 
-  int numVerts = numTriangles * 3;
+  unsigned numVerts = numTriangles * 3;
   std::vector<Float_t> triPoints(numVerts * 3);
-  std::vector<int> triPointKeys(numVerts * 2);
+  std::vector<unsigned> triPointKeys(numVerts * 2);
   std::vector<Float_t>
     triCellNorms(getSOASize(numTriangles * 3, GANG_SIZE * 3));
 
@@ -360,22 +361,22 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
                                &triCellNorms[0]);
 
 
-  std::vector<int> triIndexes(numTriangles * 3);
+  std::vector<unsigned> triIndexes(numTriangles * 3);
 
-  int curNumPts = trimesh->points.size()/3;
+  unsigned curNumPts = trimesh->points.size()/3;
 #if USE_VECTORIZED_NORMALIZE
   // resize for potential new normals
   trimesh->normals.resize(getSOASize((curNumPts + numVerts) * 3,
     GANG_SIZE * 3), 0);
 #endif
 
-  int numPts = 0, ptIdx = curNumPts;
-  for (int t = 0, i = 0; t < numTriangles; ++t)
+  unsigned numPts = 0, ptIdx = curNumPts;
+  for (unsigned t = 0, i = 0; t < numTriangles; ++t)
     {
     for (int v = 0; v < 3; ++v, ++i)
       {
-      int s = i * 3, d = numPts * 3;
-      int ind = 0;
+      unsigned s = i * 3, d = numPts * 3;
+      unsigned ind = 0;
       EdgeKey k(triPointKeys[i * 2], triPointKeys[i * 2 + 1]);
       EdgeUnorderedMap::iterator loc = emap.find(k);
       if (loc == emap.end())
@@ -401,8 +402,8 @@ void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
         }
       triIndexes[i] = ind;
 
-      int didx = ((ind/GANG_SIZE) * GANG_SIZE * 3) + (ind % GANG_SIZE);
-      int sidx = ((t/GANG_SIZE) * GANG_SIZE * 3) + (t % GANG_SIZE);
+      unsigned didx = ((ind/GANG_SIZE) * GANG_SIZE * 3) + (ind % GANG_SIZE);
+      unsigned sidx = ((t/GANG_SIZE) * GANG_SIZE * 3) + (t % GANG_SIZE);
       for (int ii = 0; ii < 3; ++ii)
         {
 #if USE_VECTORIZED_NORMALIZE
@@ -433,7 +434,7 @@ class IsosurfaceFunctor
 public:
   typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
   typedef tbb::enumerable_thread_specific<EdgeUnorderedMap> TLS_em;
-  typedef tbb::blocked_range<int> Range_t;
+  typedef tbb::blocked_range<unsigned> Range_t;
 
   IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     TLS_em &edgeMaps, TLS_tm &meshPieces)
@@ -465,7 +466,7 @@ public:
     for (IsosurfaceFunctor::TLS_tm::iterator it = range.begin();
          it != range.end(); ++it)
       {
-      int count = it->numberOfVertices();
+      unsigned count = it->numberOfVertices();
       ispc::normalizeNormals(&it->normals[0], count);
       it->normals.resize(count * 3);
       }
@@ -505,7 +506,7 @@ struct TriMeshHandle
 {
   TriangleMesh_t trimesh;
   EdgeUnorderedMap emap;
-  int npts;
+  unsigned npts;
 
   TriMeshHandle() : npts(0)
   {
@@ -514,13 +515,13 @@ struct TriMeshHandle
 
 
 extern "C" void addTriangleToOutput(void* trimeshHandle, Float_t verts[3][3],
-                                    int keys[3][2], Float_t normal[3])
+                                    unsigned keys[3][2], Float_t normal[3])
 {
   TriMeshHandle &th = *reinterpret_cast<TriMeshHandle*>(trimeshHandle);
 
   for (int v = 0; v < 3; ++v)
     {
-    int vind = 0;
+    unsigned vind = 0;
     EdgeKey ekey(keys[v][0], keys[v][1]);
     EdgeUnorderedMap::iterator loc = th.emap.find(ekey);
     if (loc != th.emap.end())
@@ -547,10 +548,10 @@ extern "C" void addTriangleToOutput(void* trimeshHandle, Float_t verts[3][3],
 
 
 void extractIsosurfaceFromTetsRange(const TetrahedronMesh_t &tetmesh,
-  int from, int to, Float_t isoval, TriMeshHandle &tmh)
+  unsigned from, unsigned to, Float_t isoval, TriMeshHandle &tmh)
 {
-  const int *tetIdxPtr = &tetmesh.indexes[from * 4];
-  int numTets = to - from;
+  const unsigned *tetIdxPtr = &tetmesh.indexes[from * 4];
+  unsigned numTets = to - from;
   ispc::extractIosurface_impl_v2(&tetmesh.points[0], &tetmesh.values[0],
                                  tetIdxPtr, tetmesh.numberOfPoints(),
                                  numTets, isoval,
@@ -563,7 +564,7 @@ class IsosurfaceFunctor
 {
 public:
   typedef tbb::enumerable_thread_specific<TriMeshHandle> TLS_tmh;
-  typedef tbb::blocked_range<int> Range_t;
+  typedef tbb::blocked_range<unsigned> Range_t;
 
   IsosurfaceFunctor(const TetrahedronMesh_t &tetmesh, Float_t isoval,
     TLS_tmh &trimeshHandles)
