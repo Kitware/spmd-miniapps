@@ -45,6 +45,7 @@ inline std::istream& LineStream::stream()
 inline void LineStream::readline()
 {
   std::getline(this->in, this->line);
+  this->sstream.clear();
   this->sstream.str(this->line);
   this->sstream.seekg(0);
 }
