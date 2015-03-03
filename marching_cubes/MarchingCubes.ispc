@@ -2,7 +2,7 @@
 
 typedef unsigned int uint;
 
-static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
+static const uniform int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
 
 export uniform uint getCellCases(uniform const Float_t buffer[],
@@ -33,7 +33,7 @@ export uniform uint getCellCases(uniform const Float_t buffer[],
     val[7] = buffer[ptIdx + dims[0] + ptxyCount];
 
     int caseId = 0;
-    for (int i = 0; i < 8; ++i)
+    for (uniform int i = 0; i < 8; ++i)
       {
       caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
       }
@@ -151,9 +151,9 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
     {
     uint cell = cellIndex[i];
 
-    uint zc = cell/cellxyCount;
-    uint yc = (cell%cellxyCount)/ncells[0];
-    uint xc = (cell%cellxyCount)%ncells[0];
+    int zc = cell/cellxyCount;
+    int yc = (cell%cellxyCount)/ncells[0];
+    int xc = (cell%cellxyCount)%ncells[0];
 
     uint ptIdx = zc * ptxyCount + yc * dims[0] + xc;
 
@@ -200,20 +200,27 @@ export void extractIsosurface_impl(uniform const Float_t buffer[],
     computeGradient(xc + 1, yc + 1, zc + 1, buffer, dims, spacing, grad[6]);
     computeGradient(xc, yc + 1, zc + 1, buffer, dims, spacing, grad[7]);
 
-    const int *edges = triangleCases + (caseIds[i] * 16);
+    const uniform int *edges = triangleCases + (caseIds[i] * 16);
     uint vidx = vertIndex[i];
-    for (; *edges != -1; ++edges, vidx += 3)
+    for (;;)
       {
-      int v1 = edgeVerts[*edges * 2 + 0], v2 = edgeVerts[*edges * 2 + 1];
+      int e = *edges++;
+      if (e == -1)
+        {
+        break;
+        }
+
+      int v1 = edgeVerts[e * 2 + 0], v2 = edgeVerts[e * 2 + 1];
       Float_t val1 = buffer[ptIdx + idxOff[v1]];
       Float_t val2 = buffer[ptIdx + idxOff[v2]];
       Float_t w = (isoval - val1)/(val2 - val1);
 
-      for (int ii = 0; ii < 3; ++ii)
+      for (uniform int ii = 0; ii < 3; ++ii)
         {
         points[vidx + ii] = lerp(pos[v1][ii], pos[v2][ii], w);
         normals[vidx + ii] = lerp(grad[v1][ii], grad[v2][ii], w);
         }
+      vidx += 3;
       }
     }
 }

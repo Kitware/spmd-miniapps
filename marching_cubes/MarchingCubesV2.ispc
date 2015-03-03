@@ -2,7 +2,7 @@
 
 typedef unsigned int uint;
 
-static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
+static const uniform int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
 export void getCellCaseIds(uniform const Float_t buffer[],
                            uniform const uint dims[3],
