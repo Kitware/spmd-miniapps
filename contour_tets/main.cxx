@@ -67,7 +67,7 @@ int main(int argc, char* argv[])
   const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
   if (omp_num_threads_str)
     {
-    int nthreads = boost::lexical_cast<Float_t>(omp_num_threads_str);
+    int nthreads = boost::lexical_cast<int>(omp_num_threads_str);
     tbbInit.initialize(nthreads);
     }
 

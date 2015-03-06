@@ -318,7 +318,7 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   PointLocator_t pl(range, dims[0]/8, dims[1]/8, dims[2]/8);
   IsosurfaceFunctor::TLS_pl pointLocators(pl);
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim, 
+  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim,
                                        0, dims[1] - 1, grainDim,
                                        0, dims[0] - 1, grainDim);
 
@@ -355,7 +355,7 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
                           (dims[2] - 1 + grainDim - 1)/grainDim};
   unsigned nblocks = blocksDim[0] * blocksDim[1] * blocksDim[2];
 
-# pragma omp parallel for firstprivate(pl) shared(meshPieces)
+# pragma omp parallel for firstprivate(pl) shared(meshPieces) schedule(dynamic)
   for (unsigned i = 0; i < nblocks; ++i)
     {
 #     pragma omp critical
