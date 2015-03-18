@@ -9,6 +9,8 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
 find_package (Boost 1.55 REQUIRED chrono system)
 find_package (ISPC REQUIRED)
 
+include_directories (${Boost_INCLUDE_DIRS} SYSTEM)
+
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
   set (MIC_BUILD ON)
 endif()
@@ -36,7 +38,7 @@ if (MIC_BUILD)
     "-I${CMAKE_CURRENT_BINARY_DIR}"
     ${ISPC_SOURCE_FILES}
   )
-  include_directories("${ISPC_ROOT}/examples/intrinsics")
+  include_directories("${ISPC_ROOT}/examples/intrinsics" SYSTEM)
 else ()
   set (POISSON_SOLVER_ISPC_GANG_SIZE "16" CACHE STRING "")
   set (POISSON_SOLVER_ISPC_ISA "avx2" CACHE STRING "")
@@ -49,10 +51,7 @@ else ()
   )
 endif (MIC_BUILD)
 
-include_directories (
-  ${Boost_INCLUDE_DIRS}
-  "${CMAKE_CURRENT_SOURCE_DIR}/../utils"
-)
+include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/../utils")
 
 add_executable (poisson MACOSX_BUNDLE
   main.cxx

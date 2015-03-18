@@ -6,10 +6,33 @@ set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_CURRENT_LIST_DIR}/../cmake/Modules/"
 )
 
-find_package (Boost 1.55 REQUIRED chrono system)
+find_package (Boost 1.55 REQUIRED chrono system thread)
 find_package (ISPC REQUIRED)
-find_package (TBB REQUIRED)
-find_package (OpenMP)
+
+include_directories (${Boost_INCLUDE_DIRS} SYSTEM)
+
+set (SMP_DOC_STRING "options: omp, tbb")
+set (MARCHING_CUBES_SMP_BACKEND "omp" CACHE STRING ${SMP_DOC_STRING})
+set_property (CACHE MARCHING_CUBES_SMP_BACKEND PROPERTY STRINGS "omp" "tbb")
+if (NOT (${MARCHING_CUBES_SMP_BACKEND} STREQUAL "omp" OR
+         ${MARCHING_CUBES_SMP_BACKEND} STREQUAL "tbb"))
+  message ("invalid smp backend choice. Resetting to openmp backend")
+  set (MARCHING_CUBES_SMP_BACKEND "omp" CACHE STRING ${SMP_DOC_STRING} FORCE)
+endif()
+
+if (${MARCHING_CUBES_SMP_BACKEND} STREQUAL "omp")
+  find_package (OpenMP REQUIRED)
+  add_definitions ("-DUSE_OMP_BACKEND" ${OpenMP_CXX_FLAGS})
+  set (SMP_LIBRARIES ${OpenMP_CXX_FLAGS})
+
+elseif (${MARCHING_CUBES_SMP_BACKEND} STREQUAL "tbb")
+  find_package (TBB REQUIRED)
+  add_definitions ("-DUSE_TBB_BACKEND" ${OpenMP_CXX_FLAGS})
+  include_directories (${TBB_INCLUDE_DIRS} SYSTEM)
+  set (SMP_LIBRARIES ${TBB_LIBRARIES})
+
+endif()
+
 
 if (CMAKE_SYSTEM_PROCESSOR STREQUAL "k1om")
   set (MIC_BUILD ON)
@@ -20,7 +43,6 @@ set (EXTRA_COMPILER_FLAGS
   CACHE STRING ""
 )
 add_definitions (${EXTRA_COMPILER_FLAGS})
-add_definitions (${OpenMP_CXX_FLAGS})
 
 set (MARCHING_CUBES_TYPE_DOUBLE ON CACHE BOOL "")
 configure_file(
@@ -42,7 +64,7 @@ if (MIC_BUILD)
     "-I${CMAKE_CURRENT_BINARY_DIR} --addressing=64"
     ${ISPC_SOURCE_FILES}
   )
-  include_directories("${ISPC_ROOT}/examples/intrinsics")
+  include_directories("${ISPC_ROOT}/examples/intrinsics" SYSTEM)
 else ()
   set (MARCHING_CUBES_ISPC_GANG_SIZE "16" CACHE STRING "")
   set (MARCHING_CUBES_ISPC_ISA "avx2" CACHE STRING "")
@@ -56,11 +78,7 @@ else ()
   )
 endif (MIC_BUILD)
 
-include_directories (
-  ${Boost_INCLUDE_DIRS}
-  ${TBB_INCLUDE_DIRS}
-  "${CMAKE_CURRENT_SOURCE_DIR}/../utils"
-)
+include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/../utils")
 
 add_executable (MarchingCubes MACOSX_BUNDLE
   MarchingCubes.cxx
@@ -74,7 +92,6 @@ add_executable (MarchingCubes MACOSX_BUNDLE
 target_link_libraries (MarchingCubes
   ${ISPC_OBJS}
   ${Boost_LIBRARIES}
-  ${TBB_LIBRARIES}
-  ${OpenMP_CXX_FLAGS}
+  ${SMP_LIBRARIES}
 )
 

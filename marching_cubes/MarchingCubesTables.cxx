@@ -278,7 +278,7 @@ const unsigned MarchingCubesTables::numberOfTriangles[256] = {
 2, 3, 3, 2, 3, 4, 2, 1, 3, 2, 4, 1, 2, 1, 1, 0
 };
 
-const int MarchingCubesTables::edgeVertices[12][2] = { {0,1}, {1,2}, {3,2}, 
+const int MarchingCubesTables::edgeVertices[12][2] = { {0,1}, {1,2}, {3,2},
                                                        {0,3}, {4,5}, {5,6},
                                                        {7,6}, {4,7}, {0,4},
                                                        {1,5}, {3,7}, {2,6} };

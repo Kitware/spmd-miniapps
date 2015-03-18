@@ -5,7 +5,9 @@
 #include <SaveTriangleMesh.h>
 #include <TriangleMesh.h>
 
+#if USE_TBB_BACKEND
 #include <tbb/task_scheduler_init.h>
+#endif
 
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
@@ -14,16 +16,14 @@
 
 typedef boost::chrono::steady_clock Clock;
 
-static const char * impstr[] = { "scalar", "shortvec", "simd", "omp_scalar",
-                                 "scalar_2", "simd_2", "scalar_2.1",
-                                 "simd_2.1" };
+static const char * impstr[] = { "scalar", "shortvec", "simd", "scalar_2",
+                                 "simd_2", "scalar_2.1", "simd_2.1" };
 
 enum ImplementationId
 {
   IMP_SCALAR = 0,
   IMP_SHORTVEC,
   IMP_SIMD,
-  IMP_OMP_SCALAR,
   IMP_SCALAR_2,
   IMP_SIMD_2,
   IMP_SCALAR_2_1,
@@ -69,6 +69,7 @@ int main(int argc, char* argv[])
     std::cout << "Invalid implementation" << std::endl;
     }
 
+#if USE_TBB_BACKEND
   tbb::task_scheduler_init tbbInit(tbb::task_scheduler_init::deferred);
   const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
   if (omp_num_threads_str)
@@ -76,6 +77,10 @@ int main(int argc, char* argv[])
     int nthreads = boost::lexical_cast<int>(omp_num_threads_str);
     tbbInit.initialize(nthreads);
     }
+  std::cout << "Using tbb backend" << std::endl;
+#else
+  std::cout << "Using omp backend" << std::endl;
+#endif
 
   Image3D_t volume;
   loadImage3D(argv[1], &volume);
@@ -96,9 +101,6 @@ int main(int argc, char* argv[])
       break;
     case IMP_SIMD:
       simd::extractIsosurface(volume, isoval, &mesh);
-      break;
-    case IMP_OMP_SCALAR:
-      ompimp::extractIsosurface(volume, isoval, &mesh);
       break;
     case IMP_SCALAR_2:
       scalar_2::extractIsosurface(volume, isoval, &mesh);

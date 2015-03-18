@@ -2,9 +2,7 @@
 #include "MarchingCubesTables.h"
 #include "MarchingCubesV2.ispc.h"
 
-#include <tbb/enumerable_thread_specific.h>
-#include <tbb/parallel_for.h>
-#include <tbb/blocked_range3d.h>
+#include <smp.h>
 
 #include <iostream>
 #include <vector>
@@ -272,15 +270,14 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
 class IsosurfaceFunctor
 {
 public:
-  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
-  typedef tbb::blocked_range3d<unsigned, unsigned, unsigned> Range_t;
+  typedef smp::ThreadLocalStorage<TriangleMesh_t> TLS_tm;
 
   IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
     : input(vol), isoval(isoval), meshPieces(meshPieces)
   {
   }
 
-  void operator()(const Range_t &range) const
+  void operator()(const smp::Range3D &range) const
   {
     unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
                            range.rows().begin(), range.rows().end() - 1,
@@ -303,12 +300,12 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *spacing = vol.getSpacing();
 
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim,
-                                       0, dims[1] - 1, grainDim,
-                                       0, dims[0] - 1, grainDim);
+  smp::Range3D cellRange(0, dims[2] - 1, grainDim,
+                         0, dims[1] - 1, grainDim,
+                         0, dims[0] - 1, grainDim);
 
   IsosurfaceFunctor func(vol, isoval, meshPieces);
-  tbb::parallel_for(cellRange, func);
+  smp::parallel_for(cellRange, func);
   mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }
 
@@ -503,15 +500,14 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
 class IsosurfaceFunctor
 {
 public:
-  typedef tbb::enumerable_thread_specific<TriangleMesh_t> TLS_tm;
-  typedef tbb::blocked_range3d<unsigned, unsigned, unsigned> Range_t;
+  typedef smp::ThreadLocalStorage<TriangleMesh_t> TLS_tm;
 
   IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_tm &meshPieces)
     : input(vol), isoval(isoval), meshPieces(meshPieces)
   {
   }
 
-  void operator()(const Range_t &range) const
+  void operator()(const smp::Range3D &range) const
   {
     unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
                            range.rows().begin(), range.rows().end() - 1,
@@ -534,12 +530,12 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *spacing = vol.getSpacing();
 
   IsosurfaceFunctor::TLS_tm meshPieces;
-  IsosurfaceFunctor::Range_t cellRange(0, dims[2] - 1, grainDim,
-                                       0, dims[1] - 1, grainDim,
-                                       0, dims[0] - 1, grainDim);
+  smp::Range3D cellRange(0, dims[2] - 1, grainDim,
+                         0, dims[1] - 1, grainDim,
+                         0, dims[0] - 1, grainDim);
 
   IsosurfaceFunctor func(vol, isoval, meshPieces);
-  tbb::parallel_for(cellRange, func);
+  smp::parallel_for(cellRange, func);
   mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }
 

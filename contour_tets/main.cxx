@@ -5,7 +5,9 @@
 #include <TetrahedronMesh.h>
 #include <TriangleMesh.h>
 
+#if USE_TBB_BACKEND
 #include <tbb/task_scheduler_init.h>
+#endif
 
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
@@ -63,6 +65,7 @@ int main(int argc, char* argv[])
     return 1;
     }
 
+#if USE_TBB_BACKEND
   tbb::task_scheduler_init tbbInit(tbb::task_scheduler_init::deferred);
   const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
   if (omp_num_threads_str)
@@ -70,6 +73,10 @@ int main(int argc, char* argv[])
     int nthreads = boost::lexical_cast<int>(omp_num_threads_str);
     tbbInit.initialize(nthreads);
     }
+  std::cout << "Using tbb backend" << std::endl;
+#else
+  std::cout << "Using omp backend" << std::endl;
+#endif
 
   TetrahedronMesh_t tetmesh;
   loadTetrahedronMesh(argv[1], &tetmesh);
