@@ -120,7 +120,9 @@ int main(int argc, char* argv[])
   std::cout << "ntris: " << trimesh.numberOfTriangles() << std::endl;
   std::cout << "done in " << sec.count() << " seconds\n";
 
+#if !SCALING_TEST_BUILD
   saveTriangleMesh(trimesh, argv[2]);
+#endif
 
   return 0;
 }

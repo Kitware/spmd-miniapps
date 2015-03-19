@@ -41,6 +41,11 @@ void mergeTriangleMeshes(MeshListIterator from, MeshListIterator to,
     indsSize += i->indexes.size();
     }
 
+#if SCALING_TEST_BUILD
+  outMesh->points.resize(ptsSize);
+  outMesh->normals.resize(ptsSize);
+  outMesh->indexes.resize(indsSize);
+#else
   outMesh->points.reserve(ptsSize);
   outMesh->normals.reserve(ptsSize);
   outMesh->indexes.reserve(indsSize);
@@ -59,6 +64,7 @@ void mergeTriangleMeshes(MeshListIterator from, MeshListIterator to,
       outMesh->indexes.push_back(i->indexes[j] + lastInd);
       }
     }
+#endif
 }
 
 #endif

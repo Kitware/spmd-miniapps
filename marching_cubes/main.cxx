@@ -137,7 +137,9 @@ int main(int argc, char* argv[])
   std::cout << "ntris: " << mesh.numberOfTriangles() << std::endl;
   std::cout << "done in " << sec.count() << " seconds\n";
 
+#if !SCALING_TEST_BUILD
   saveTriangleMesh(mesh, argv[2]);
+#endif
 
   return 0;
 }
