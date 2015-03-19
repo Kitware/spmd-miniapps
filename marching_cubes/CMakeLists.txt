@@ -27,7 +27,7 @@ if (${MARCHING_CUBES_SMP_BACKEND} STREQUAL "omp")
 
 elseif (${MARCHING_CUBES_SMP_BACKEND} STREQUAL "tbb")
   find_package (TBB REQUIRED)
-  add_definitions ("-DUSE_TBB_BACKEND" ${OpenMP_CXX_FLAGS})
+  add_definitions ("-DUSE_TBB_BACKEND")
   include_directories (${TBB_INCLUDE_DIRS} SYSTEM)
   set (SMP_LIBRARIES ${TBB_LIBRARIES})
 
