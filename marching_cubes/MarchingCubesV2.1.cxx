@@ -10,14 +10,9 @@
 #include <vector>
 
 static const unsigned grainDim = 32;
+extern int NumberOfThreads;
 
 typedef boost::unordered_map<unsigned, unsigned> EdgeUnorderedMap;
-
-inline size_t estimateNumberOfBuckets(const unsigned dims[3], float loadFactor)
-{
-  size_t estimatedNumOfVertexes = (dims[0] * dims[1] * dims[2])/32;
-  return estimatedNumOfVertexes/loadFactor;
-}
 
 inline void generateEdgeIdOffsets(unsigned xdim, unsigned xydim,
                                   unsigned offsets[12])
@@ -82,32 +77,25 @@ struct CellInfo
   int caseId;
 };
 
-class CaseIdIsLess
-{
-public:
-  bool operator()(const CellInfo &c1, const CellInfo &c2) const
-  {
-    return (c1.caseId < c2.caseId);
-  }
-};
-
-class CellIsEmpty
-{
-public:
-  bool operator()(const CellInfo &c) const
-  {
-    return (c.caseId == 0 || c.caseId == 255);
-  }
-};
-
 struct EdgeInfo
 {
   unsigned edgeId, pos;
   unsigned idx[4];
 };
 
+struct ScratchPad
+{
+  bool inited;
+  const unsigned *edgeIdOffsets;
+  std::vector<CellInfo> cellInfo;
+  std::vector<EdgeInfo> edgeInfo;
+  EdgeUnorderedMap edgeMap;
+
+  ScratchPad() : inited(false), edgeIdOffsets(NULL) {}
+};
+
 void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
-  Float_t isoval, EdgeUnorderedMap &edgeMap, TriangleMesh_t *mesh)
+  Float_t isoval, ScratchPad &sp, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
   static const unsigned idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
@@ -121,15 +109,7 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
   const Float_t *buffer = vol.getData();
   unsigned xydim = dims[0] * dims[1];
 
-  unsigned edgeIdOffsets[12];
-  generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
-
   // part 1: compute caseId of each cell
-  unsigned ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
-                    (ext[5] - ext[4] + 1);
-  std::vector<CellInfo> cellInfo;
-  cellInfo.reserve(ncells);
-
   for (unsigned zidx = ext[4]; zidx <= ext[5]; ++zidx)
     {
     for (unsigned yidx = ext[2]; yidx <= ext[3]; ++yidx)
@@ -154,35 +134,30 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
           caseId |= (val[i] >= isoval) ? caseMask[i] : 0;
           }
 
-        CellInfo ci = { { xidx, yidx, zidx}, caseId };
-        cellInfo.push_back(ci);
+        if (caseId > 0 && caseId < 255)
+          {
+          CellInfo ci = { { xidx, yidx, zidx}, caseId };
+          sp.cellInfo.push_back(ci);
+          }
         }
       }
     }
 
-  // part 2: remove empty cells and sort by caseId
-  std::vector<CellInfo>::iterator newEnd
-    = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
-  cellInfo.resize(newEnd - cellInfo.begin());
-  std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
-
-  // part 3: generate edges and indexes
-  ncells = cellInfo.size();
-  std::vector<EdgeInfo> edgeInfo;
-
+  // part 2: generate edges and indexes
+  unsigned ncells = sp.cellInfo.size();
   unsigned npts = mesh->points.size()/3;
   for (unsigned i = 0, pos = npts; i < ncells; ++i)
     {
-    const CellInfo &ci = cellInfo[i];
+    const CellInfo &ci = sp.cellInfo[i];
     const int *edges = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     unsigned baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) +
                         (ci.idx[2] * xydim)) * 3;
 
     for (; *edges != -1; ++edges)
       {
-      unsigned edgeUid = baseEdge + edgeIdOffsets[*edges];
-      EdgeUnorderedMap::iterator loc = edgeMap.find(edgeUid);
-      if (loc != edgeMap.end())
+      unsigned edgeUid = baseEdge + sp.edgeIdOffsets[*edges];
+      EdgeUnorderedMap::iterator loc = sp.edgeMap.find(edgeUid);
+      if (loc != sp.edgeMap.end())
         {
         mesh->indexes.push_back(loc->second);
         }
@@ -196,17 +171,17 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
         ei.idx[3] = *edges;
         ei.pos = pos;
 
-        edgeInfo.push_back(ei);
-        edgeMap[edgeUid] = pos;
+        sp.edgeInfo.push_back(ei);
+        sp.edgeMap[edgeUid] = pos;
         mesh->indexes.push_back(pos++);
         }
       }
     }
 
-  // part 4: compute gradients and generate vertices
-  for (unsigned i = 0;  i < edgeInfo.size(); ++i)
+  // part 3: compute gradients and generate vertices
+  for (unsigned i = 0;  i < sp.edgeInfo.size(); ++i)
     {
-    const EdgeInfo &ei = edgeInfo[i];
+    const EdgeInfo &ei = sp.edgeInfo[i];
 
     unsigned p1idx[3], p2idx[3];
     int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
@@ -241,11 +216,12 @@ class IsosurfaceFunctor
 {
 public:
   typedef smp::ThreadLocalStorage<TriangleMesh_t> TLS_tm;
-  typedef smp::ThreadLocalStorage<EdgeUnorderedMap> TLS_em;
+  typedef smp::ThreadLocalStorage<ScratchPad> TLS_sp;
 
-  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_em &edgeMaps,
-                    TLS_tm &meshPieces)
-    : input(vol), isoval(isoval), edgeMaps(edgeMaps), meshPieces(meshPieces)
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_sp &scratchPads,
+                    TLS_tm &meshPieces, const unsigned *edgeIdOffsets)
+    : input(vol), isoval(isoval), scratchPads(scratchPads),
+      meshPieces(meshPieces), edgeIdOffsets(edgeIdOffsets)
   {
   }
 
@@ -254,17 +230,46 @@ public:
     unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
                            range.rows().begin(), range.rows().end() - 1,
                            range.pages().begin(), range.pages().end() - 1 };
+
     TriangleMesh_t &meshPiece = this->meshPieces.local();
-    EdgeUnorderedMap &edgeMap = this->edgeMaps.local();
-    extractIsosurfaceFromBlock(this->input, extent, this->isoval, edgeMap,
+    ScratchPad &scratchPad = this->scratchPads.local();
+    if (!scratchPad.inited)
+      {
+      const unsigned *dims = this->input.getDimension();
+      unsigned estblockDim[3] = { grainDim * 3, grainDim  * 3, grainDim * 3 };
+      unsigned estNumTriangles = estimatedNumberOfTriangles(dims) /
+                                 NumberOfThreads;
+      unsigned estNumPoints = estimatedNumberOfPoints(dims)/NumberOfThreads;
+      unsigned estNumPointsPerBlock = estimatedNumberOfPoints(estblockDim);
+      unsigned estNumActiveCells = estimatedNumberOfActiveCells(estblockDim);
+
+      scratchPad.edgeIdOffsets = this->edgeIdOffsets;
+      scratchPad.cellInfo.reserve(estNumActiveCells);
+      scratchPad.edgeInfo.reserve(estNumPointsPerBlock);
+      scratchPad.edgeMap.rehash(estNumPointsPerBlock);
+
+      meshPiece.points.reserve(estNumPoints * 3);
+      meshPiece.normals.reserve(estNumPoints * 3);
+      meshPiece.indexes.reserve(estNumTriangles * 3);
+
+      scratchPad.inited = true;
+      }
+
+    // cleanup previous state
+    scratchPad.cellInfo.clear();
+    scratchPad.edgeInfo.clear();
+
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, scratchPad,
                                &meshPiece);
   }
 
 private:
   const Image3D_t &input;
   Float_t isoval;
-  TLS_em &edgeMaps;
+  TLS_sp &scratchPads;
   TLS_tm &meshPieces;
+
+  const unsigned *edgeIdOffsets;
 };
 
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
@@ -274,13 +279,16 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
 
-  IsosurfaceFunctor::TLS_em edgeMaps;
+  unsigned edgeIdOffsets[12];
+  generateEdgeIdOffsets(dims[0], dims[0] * dims[1], edgeIdOffsets);
+
+  IsosurfaceFunctor::TLS_sp scratchPads;
   IsosurfaceFunctor::TLS_tm meshPieces;
   smp::Range3D cellRange(0, dims[2] - 1, grainDim,
                          0, dims[1] - 1, grainDim,
                          0, dims[0] - 1, grainDim);
 
-  IsosurfaceFunctor func(vol, isoval, edgeMaps, meshPieces);
+  IsosurfaceFunctor func(vol, isoval, scratchPads, meshPieces, edgeIdOffsets);
   smp::parallel_for(cellRange, func);
   mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }
@@ -295,32 +303,26 @@ struct CellInfo
   int caseId;
 };
 
-class CaseIdIsLess
-{
-public:
-  bool operator()(const CellInfo &c1, const CellInfo &c2) const
-  {
-    return (c1.caseId < c2.caseId);
-  }
-};
-
-class CellIsEmpty
-{
-public:
-  bool operator()(const CellInfo &c) const
-  {
-    return (c.caseId == 0 || c.caseId == 255);
-  }
-};
-
 struct EdgeInfo
 {
   unsigned edgeId, pos;
   unsigned idx[4];
 };
 
+struct ScratchPad
+{
+  bool inited;
+  const unsigned *edgeIdOffsets;
+  std::vector<int> caseIds;
+  std::vector<CellInfo> cellInfo;
+  std::vector<EdgeInfo> edgeInfo;
+  EdgeUnorderedMap edgeMap;
+
+  ScratchPad() : inited(false), edgeIdOffsets(NULL) {}
+};
+
 void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
-  Float_t isoval, EdgeUnorderedMap &edgeMap, TriangleMesh_t *mesh)
+  Float_t isoval, ScratchPad &sp, TriangleMesh_t *mesh)
 {
   static const int caseMask[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
   static const unsigned idxOffset[8][3] = { { 0, 0, 0}, { 1, 0, 0},
@@ -334,53 +336,42 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
   const Float_t *buffer = vol.getData();
   unsigned xydim = dims[0] * dims[1];
 
-  unsigned edgeIdOffsets[12];
-  generateEdgeIdOffsets(dims[0], xydim, edgeIdOffsets);
-
   // part 1: compute caseId of each cell
   unsigned ncells = (ext[1] - ext[0] + 1) * (ext[3] - ext[2] + 1) *
                     (ext[5] - ext[4] + 1);
-  std::vector<int> caseIds(ncells);
-  ispc::getCellCaseIds(buffer, dims, ext, isoval, &caseIds[0]);
+  sp.caseIds.resize(ncells);
+  ispc::getCellCaseIds(buffer, dims, ext, isoval, &sp.caseIds[0]);
 
-  std::vector<CellInfo> cellInfo(ncells);
   for (unsigned z = ext[4], i = 0; z <= ext[5]; ++z)
     {
     for (unsigned y = ext[2]; y <= ext[3]; ++y)
       {
       for (unsigned x = ext[0]; x <= ext[1]; ++x, ++i)
         {
-        cellInfo[i].idx[0] = x;
-        cellInfo[i].idx[1] = y;
-        cellInfo[i].idx[2] = z;
-        cellInfo[i].caseId = caseIds[i];
+        if (sp.caseIds[i] > 0 && sp.caseIds[i] < 255)
+          {
+          CellInfo ci = { { x, y, z}, sp.caseIds[i] };
+          sp.cellInfo.push_back(ci);
+          }
         }
       }
     }
 
-  // part 2: remove empty cells and sort by caseId
-  std::vector<CellInfo>::iterator newEnd
-    = std::remove_if(cellInfo.begin(), cellInfo.end(), CellIsEmpty());
-  cellInfo.resize(newEnd - cellInfo.begin());
-  std::sort(cellInfo.begin(), cellInfo.end(), CaseIdIsLess());
-
-  // part 3: generate edges and indexes
-  ncells = cellInfo.size();
-  std::vector<EdgeInfo> edgeInfo;
-
+  // part 2: generate edges and indexes
+  ncells = sp.cellInfo.size();
   unsigned npts = mesh->points.size()/3;
   for (unsigned i = 0, pos = npts; i < ncells; ++i)
     {
-    const CellInfo &ci = cellInfo[i];
+    const CellInfo &ci = sp.cellInfo[i];
     const int *edges = MarchingCubesTables::getCaseTrianglesEdges(ci.caseId);
     unsigned baseEdge = (ci.idx[0] + (ci.idx[1] * dims[0]) +
                         (ci.idx[2] * xydim)) * 3;
 
     for (; *edges != -1; ++edges)
       {
-      unsigned edgeUid = baseEdge + edgeIdOffsets[*edges];
-      EdgeUnorderedMap::iterator loc = edgeMap.find(edgeUid);
-      if (loc != edgeMap.end())
+      unsigned edgeUid = baseEdge + sp.edgeIdOffsets[*edges];
+      EdgeUnorderedMap::iterator loc = sp.edgeMap.find(edgeUid);
+      if (loc != sp.edgeMap.end())
         {
         mesh->indexes.push_back(loc->second);
         }
@@ -394,17 +385,17 @@ void extractIsosurfaceFromBlock(const Image3D_t &vol, const unsigned ext[6],
         ei.idx[3] = *edges;
         ei.pos = pos;
 
-        edgeInfo.push_back(ei);
-        edgeMap[edgeUid] = pos;
+        sp.edgeInfo.push_back(ei);
+        sp.edgeMap[edgeUid] = pos;
         mesh->indexes.push_back(pos++);
         }
       }
     }
 
-  // part 4: compute gradients and generate vertices
-  for (unsigned i = 0;  i < edgeInfo.size(); ++i)
+  // part 3: compute gradients and generate vertices
+  for (unsigned i = 0;  i < sp.edgeInfo.size(); ++i)
     {
-    const EdgeInfo &ei = edgeInfo[i];
+    const EdgeInfo &ei = sp.edgeInfo[i];
 
     unsigned p1idx[3], p2idx[3];
     int p1 = MarchingCubesTables::getEdgeVertices(ei.idx[3])[0];
@@ -439,11 +430,12 @@ class IsosurfaceFunctor
 {
 public:
   typedef smp::ThreadLocalStorage<TriangleMesh_t> TLS_tm;
-  typedef smp::ThreadLocalStorage<EdgeUnorderedMap> TLS_em;
+  typedef smp::ThreadLocalStorage<ScratchPad> TLS_sp;
 
-  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_em &edgeMaps,
-                    TLS_tm &meshPieces)
-    : input(vol), isoval(isoval), edgeMaps(edgeMaps), meshPieces(meshPieces)
+  IsosurfaceFunctor(const Image3D_t &vol, Float_t isoval, TLS_sp &scratchPads,
+                    TLS_tm &meshPieces, const unsigned *edgeIdOffsets)
+    : input(vol), isoval(isoval), scratchPads(scratchPads),
+      meshPieces(meshPieces), edgeIdOffsets(edgeIdOffsets)
   {
   }
 
@@ -452,17 +444,48 @@ public:
     unsigned extent[6] = { range.cols().begin(), range.cols().end() - 1,
                            range.rows().begin(), range.rows().end() - 1,
                            range.pages().begin(), range.pages().end() - 1 };
+
     TriangleMesh_t &meshPiece = this->meshPieces.local();
-    EdgeUnorderedMap &edgeMap = this->edgeMaps.local();
-    extractIsosurfaceFromBlock(this->input, extent, this->isoval, edgeMap,
+    ScratchPad &scratchPad = this->scratchPads.local();
+    if (!scratchPad.inited)
+      {
+      const unsigned *dims = this->input.getDimension();
+      unsigned estblockDim[3] = { grainDim * 3, grainDim  * 3, grainDim * 3 };
+      unsigned estNumTriangles = estimatedNumberOfTriangles(dims) /
+                                 NumberOfThreads;
+      unsigned estNumPoints = estimatedNumberOfPoints(dims)/NumberOfThreads;
+      unsigned estNumPointsPerBlock = estimatedNumberOfPoints(estblockDim);
+      unsigned estNumActiveCells = estimatedNumberOfActiveCells(estblockDim);
+
+      scratchPad.edgeIdOffsets = edgeIdOffsets;
+      scratchPad.caseIds.reserve(grainDim * grainDim * grainDim * 8);
+      scratchPad.cellInfo.reserve(estNumActiveCells);
+      scratchPad.edgeInfo.reserve(estNumPointsPerBlock);
+      scratchPad.edgeMap.rehash(estNumPointsPerBlock);
+
+      meshPiece.points.reserve(estNumPoints * 3);
+      meshPiece.normals.reserve(estNumPoints * 3);
+      meshPiece.indexes.reserve(estNumTriangles * 3);
+
+      scratchPad.inited = true;
+      }
+
+    // cleanup previous state
+    scratchPad.caseIds.clear();
+    scratchPad.cellInfo.clear();
+    scratchPad.edgeInfo.clear();
+
+    extractIsosurfaceFromBlock(this->input, extent, this->isoval, scratchPad,
                                &meshPiece);
   }
 
 private:
   const Image3D_t &input;
   Float_t isoval;
-  TLS_em &edgeMaps;
+  TLS_sp &scratchPads;
   TLS_tm &meshPieces;
+
+  const unsigned *edgeIdOffsets;
 };
 
 void extractIsosurface(const Image3D_t &vol, Float_t isoval,
@@ -472,13 +495,16 @@ void extractIsosurface(const Image3D_t &vol, Float_t isoval,
   const Float_t *origin = vol.getOrigin();
   const Float_t *spacing = vol.getSpacing();
 
-  IsosurfaceFunctor::TLS_em edgeMaps;
+  unsigned edgeIdOffsets[12];
+  generateEdgeIdOffsets(dims[0], dims[0] * dims[1], edgeIdOffsets);
+
+  IsosurfaceFunctor::TLS_sp scratchPads;
   IsosurfaceFunctor::TLS_tm meshPieces;
   smp::Range3D cellRange(0, dims[2] - 1, grainDim,
                          0, dims[1] - 1, grainDim,
                          0, dims[0] - 1, grainDim);
 
-  IsosurfaceFunctor func(vol, isoval, edgeMaps, meshPieces);
+  IsosurfaceFunctor func(vol, isoval, scratchPads, meshPieces, edgeIdOffsets);
   smp::parallel_for(cellRange, func);
   mergeTriangleMeshes(meshPieces.begin(), meshPieces.end(), mesh);
 }

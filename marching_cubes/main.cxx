@@ -7,10 +7,15 @@
 
 #if USE_TBB_BACKEND
 #include <tbb/task_scheduler_init.h>
+#include <boost/thread.hpp>
+#endif
+#if USE_OMP_BACKEND
+#include <omp.h>
 #endif
 
 #include <boost/chrono.hpp>
 #include <boost/lexical_cast.hpp>
+
 #include <iostream>
 #include <string>
 
@@ -46,6 +51,8 @@ ImplementationId getImplementationId(const char *str)
   return imp;
 }
 
+int NumberOfThreads = 1;
+
 int main(int argc, char* argv[])
 {
   if (argc != 5)
@@ -74,11 +81,16 @@ int main(int argc, char* argv[])
   const char *omp_num_threads_str = getenv("OMP_NUM_THREADS");
   if (omp_num_threads_str)
     {
-    int nthreads = boost::lexical_cast<int>(omp_num_threads_str);
-    tbbInit.initialize(nthreads);
+    NumberOfThreads = boost::lexical_cast<int>(omp_num_threads_str);
+    tbbInit.initialize(NumberOfThreads);
+    }
+  else
+    {
+    NumberOfThreads = std::max(1u, boost::thread::hardware_concurrency());
     }
   std::cout << "Using tbb backend" << std::endl;
 #else
+  NumberOfThreads = omp_get_max_threads();
   std::cout << "Using omp backend" << std::endl;
 #endif
 
