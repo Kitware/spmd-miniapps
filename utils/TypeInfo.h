@@ -3,9 +3,9 @@
 
 #include <string>
 
-static const char *names[] = { "unknown", "char", "short", "int", "float",
-                               "double" };
-static const size_t sizes[] = { 0, 1, 2, 4, 4, 8 };
+static const char *names[] = { "unknown", "char", "short", "unsigned_short",
+                               "int", "float", "double" };
+static const size_t sizes[] = { 0, 1, 2, 2, 4, 4, 8 };
 
 class TypeInfo
 {
@@ -15,6 +15,7 @@ public:
     ID_UNKNOWN = 0,
     ID_CHAR,
     ID_SHORT,
+    ID_USHORT,
     ID_INT,
     ID_FLOAT,
     ID_DOUBLE,
@@ -83,6 +84,12 @@ TypeInfo createTypeInfo<char>()
 
 template<>
 TypeInfo createTypeInfo<short>()
+{
+  return TypeInfo(TypeInfo::ID_SHORT);
+}
+
+template<>
+TypeInfo createTypeInfo<unsigned short>()
 {
   return TypeInfo(TypeInfo::ID_SHORT);
 }

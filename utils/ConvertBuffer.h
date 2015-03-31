@@ -39,6 +39,9 @@ void convertBufferWithTypeInfo(const char *in, const TypeInfo &ti,
     case TypeInfo::ID_SHORT:
       convertBuffer(reinterpret_cast<const short*>(in), nelms, out);
       break;
+    case TypeInfo::ID_USHORT:
+      convertBuffer(reinterpret_cast<const unsigned short*>(in), nelms, out);
+      break;
     case TypeInfo::ID_INT:
       convertBuffer(reinterpret_cast<const int*>(in), nelms, out);
       break;
