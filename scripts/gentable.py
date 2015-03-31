@@ -7,7 +7,10 @@ avgtime = []
 
 times = []
 
-testlog = open(sys.argv[1], "rb")
+if len(sys.argv) == 1:
+  testlog = sys.stdin
+else:
+  testlog = open(sys.argv[1], "rb")
 
 for line in testlog:
   if line.startswith("Running with "):
